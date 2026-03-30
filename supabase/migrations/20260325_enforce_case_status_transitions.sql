@@ -67,6 +67,21 @@ begin
   set status = next_status
   where public.cases.id = target_case_id;
 
+  insert into public.case_events (
+    case_id,
+    case_number,
+    event_type,
+    created_by,
+    metadata
+  )
+  values (
+    current_case.id,
+    current_case.case_number,
+    'status_updated',
+    changed_by,
+    '{}'::jsonb
+  );
+
   insert into public.case_status_history (
     case_id,
     case_number,

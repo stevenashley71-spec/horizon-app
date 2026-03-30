@@ -9,9 +9,10 @@ import { formatCaseEventType } from '@/lib/case-events'
 import {
   getCurrentWorkflowStep,
   getNextAllowedEventType,
-  getOrderedOperationalEventTypes,
   isCaseWorkflowComplete,
+  isOperationalWorkflowEventType,
   type CaseWorkflowEventLike,
+  type OperationalWorkflowEventType,
 } from '@/lib/case-workflow'
 
 type EventFormState = {
@@ -48,10 +49,12 @@ export function CaseEventForm({
   caseId,
   caseEvents,
   cremationType,
+  allowedEventType = null,
 }: {
   caseId: string
   caseEvents: CaseWorkflowEventLike[] | null | undefined
   cremationType?: string | null
+  allowedEventType?: OperationalWorkflowEventType | null
 }) {
   const router = useRouter()
   const [state, formAction] = useActionState(
@@ -77,15 +80,14 @@ export function CaseEventForm({
   )
 
   const workflowOptions = { cremationType }
-  const operationalEventTypes = new Set(getOrderedOperationalEventTypes(workflowOptions))
   const currentWorkflowStep = getCurrentWorkflowStep(caseEvents, workflowOptions)
   const nextRequiredEvent = getNextAllowedEventType(caseEvents, workflowOptions)
   const workflowComplete = isCaseWorkflowComplete(caseEvents, workflowOptions)
   const latestOperationalEventType =
     [...(caseEvents ?? [])]
       .filter(
-        (event): event is CaseWorkflowEventLike & { event_type: string } =>
-          typeof event?.event_type === 'string' && operationalEventTypes.has(event.event_type)
+        (event): event is CaseWorkflowEventLike & { event_type: OperationalWorkflowEventType } =>
+          typeof event?.event_type === 'string' && isOperationalWorkflowEventType(event.event_type)
       )
       .sort((a, b) => {
         const aTime = a.created_at ? new Date(a.created_at).getTime() : 0
@@ -104,7 +106,40 @@ export function CaseEventForm({
     )
   }
 
-  if (!nextRequiredEvent || !operationalEventTypes.has(nextRequiredEvent)) {
+  if (allowedEventType) {
+    if (nextRequiredEvent !== allowedEventType) {
+      return (
+        <div className="space-y-2">
+          <p className="text-sm text-slate-600">
+            The next available workflow event is{' '}
+            {nextRequiredEvent ? formatCaseEventType(nextRequiredEvent) : 'none'}.
+          </p>
+          {state.error ? <p className="text-sm text-red-700">{state.error}</p> : null}
+          {state.success ? <p className="text-sm text-emerald-700">{state.success}</p> : null}
+        </div>
+      )
+    }
+
+    return (
+      <form action={formAction} className="space-y-4">
+        <div className="rounded-xl border border-slate-200 px-4 py-3">
+          <div className="text-sm font-medium text-slate-500">Next required event</div>
+          <div className="mt-1 text-sm font-semibold text-slate-900">
+            {formatCaseEventType(allowedEventType)}
+          </div>
+        </div>
+
+        <div className="flex flex-wrap gap-3">
+          <SubmitButton eventType={allowedEventType} />
+        </div>
+
+        {state.error ? <p className="text-sm text-red-700">{state.error}</p> : null}
+        {state.success ? <p className="text-sm text-emerald-700">{state.success}</p> : null}
+      </form>
+    )
+  }
+
+  if (!nextRequiredEvent) {
     return (
       <div className="space-y-2">
         <p className="text-sm text-slate-600">

@@ -52,7 +52,9 @@ function getOperationalWorkflowSequence(options: CaseWorkflowOptions = {}) {
     : PRIVATE_OPERATIONAL_WORKFLOW_SEQUENCE
 }
 
-function isOperationalWorkflowEventType(value: string): value is OperationalWorkflowEventType {
+export function isOperationalWorkflowEventType(
+  value: string
+): value is OperationalWorkflowEventType {
   return ALL_OPERATIONAL_WORKFLOW_EVENT_TYPES.includes(value as OperationalWorkflowEventType)
 }
 

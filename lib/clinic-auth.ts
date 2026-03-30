@@ -1,3 +1,4 @@
+import { getUserRole } from '@/lib/auth/get-user-role'
 import { createServerAuthSupabase, createServerSupabase } from '@/lib/supabase/server'
 
 export type ClinicContext = {
@@ -17,33 +18,62 @@ type ClinicContextResult =
       message: string
     }
 
-async function getAuthenticatedUserId() {
-  const supabase = await createServerAuthSupabase()
+export async function getClinicContextResult(): Promise<ClinicContextResult | null> {
+  const userRole = await getUserRole()
+
+  if (userRole?.role === 'clinic_user') {
+    const supabase = await createServerSupabase()
+    const { data: clinic, error: clinicError } = await supabase
+      .from('clinics')
+      .select('id, name, logo_path, is_active')
+      .eq('id', userRole.clinicId)
+      .single()
+
+    if (clinicError || !clinic || !clinic.is_active) {
+      return {
+        kind: 'blocked',
+        message: 'Your clinic account is inactive.',
+      }
+    }
+
+    return {
+      kind: 'ok',
+      clinic: {
+        userId: userRole.userId,
+        clinicId: clinic.id,
+        clinicName: clinic.name,
+        clinicLogoPath: clinic.logo_path,
+      },
+    }
+  }
+
+  const authSupabase = await createServerAuthSupabase()
   const {
     data: { user },
-  } = await supabase.auth.getUser()
+  } = await authSupabase.auth.getUser()
 
-  return user?.id ?? null
-}
-
-export async function getClinicContextResult(): Promise<ClinicContextResult | null> {
-  const userId = await getAuthenticatedUserId()
-
-  if (!userId) {
+  if (!user) {
     return null
   }
 
-  const supabase = createServerSupabase()
+  const supabase = await createServerSupabase()
   const { data: clinicUser, error: clinicUserError } = await supabase
     .from('clinic_users')
-    .select('clinic_id')
-    .eq('user_id', userId)
+    .select('clinic_id, is_active')
+    .eq('user_id', user.id)
     .single()
 
   if (clinicUserError || !clinicUser) {
     return {
       kind: 'blocked',
       message: 'Your account is not linked to a clinic.',
+    }
+  }
+
+  if (!clinicUser.is_active) {
+    return {
+      kind: 'blocked',
+      message: 'Your clinic account is inactive.',
     }
   }
 
@@ -63,7 +93,7 @@ export async function getClinicContextResult(): Promise<ClinicContextResult | nu
   return {
     kind: 'ok',
     clinic: {
-      userId,
+      userId: user.id,
       clinicId: clinic.id,
       clinicName: clinic.name,
       clinicLogoPath: clinic.logo_path,

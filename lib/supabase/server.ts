@@ -62,6 +62,6 @@ export function createServiceRoleSupabase() {
   )
 }
 
-export function createServerSupabase() {
-  return createServiceRoleSupabase()
+export async function createServerSupabase() {
+  return createServerAuthSupabase()
 }

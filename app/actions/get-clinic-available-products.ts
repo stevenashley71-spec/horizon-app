@@ -1,5 +1,6 @@
 'use server'
 
+import { getClinicContextResult } from '@/lib/clinic-auth'
 import { createServerSupabase } from '@/lib/supabase/server'
 import {
   isProductCategory,
@@ -25,22 +26,34 @@ type ClinicProductRow = {
   price_override: number | null
 }
 
-function getImageUrl(imagePath: string | null) {
+async function getImageUrl(imagePath: string | null) {
   if (!imagePath) {
     return null
   }
 
-  const supabase = createServerSupabase()
+  const supabase = await createServerSupabase()
   const { data } = supabase.storage.from('product-images').getPublicUrl(imagePath)
   return data.publicUrl
 }
 
 export async function getClinicAvailableProducts(clinicId: string): Promise<ClinicAvailableProduct[]> {
-  if (!clinicId) {
-    return []
+  const clinicResult = await getClinicContextResult()
+
+  if (!clinicResult) {
+    throw new Error('Authentication required')
   }
 
-  const supabase = createServerSupabase()
+  if (clinicResult.kind === 'blocked') {
+    throw new Error(clinicResult.message)
+  }
+
+  const authenticatedClinicId = clinicResult.clinic.clinicId
+
+  if (clinicId && clinicId !== authenticatedClinicId) {
+    throw new Error('You do not have permission to view products for this clinic')
+  }
+
+  const supabase = await createServerSupabase()
 
   const { data: products, error: productsError } = await supabase
     .from('products')
@@ -57,7 +70,7 @@ export async function getClinicAvailableProducts(clinicId: string): Promise<Clin
   const { data: overrides, error: overridesError } = await supabase
     .from('clinic_products')
     .select('product_id, is_active, price_override')
-    .eq('clinic_id', clinicId)
+    .eq('clinic_id', authenticatedClinicId)
 
   if (overridesError) {
     throw new Error(overridesError.message)
@@ -67,8 +80,8 @@ export async function getClinicAvailableProducts(clinicId: string): Promise<Clin
     ((overrides as ClinicProductRow[] | null) ?? []).map((override) => [override.product_id, override])
   )
 
-  return ((products as ProductRow[] | null) ?? [])
-    .map((product) => {
+  const availableProducts = await Promise.all(
+    ((products as ProductRow[] | null) ?? []).map(async (product) => {
       if (!isProductCategory(product.category)) {
         return null
       }
@@ -86,10 +99,13 @@ export async function getClinicAvailableProducts(clinicId: string): Promise<Clin
         category: product.category as ProductCategory,
         description: product.description,
         price: override?.price_override ?? product.base_price,
-        imageUrl: getImageUrl(product.image_path),
+        imageUrl: await getImageUrl(product.image_path),
         sortOrder: product.sort_order,
         includedByDefault: product.included_by_default,
       } satisfies ClinicAvailableProduct
     })
+  )
+
+  return availableProducts
     .filter((product): product is ClinicAvailableProduct => product !== null)
 }

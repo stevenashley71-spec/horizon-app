@@ -1,11 +1,29 @@
-import { createServerSupabase } from '@/lib/supabase/server'
-import { formatCaseStatus } from '@/lib/case-status'
-import { resolveCaseDisplayStatus } from '@/lib/resolve-case-display-status'
 import Link from 'next/link'
+import { redirect } from 'next/navigation'
+
+import { ClinicAccessBlocked } from '@/app/components/clinic-access-blocked'
+import { ClinicPortalFrame } from '@/app/components/clinic-portal-frame'
+import { InternalPortalFrame } from '@/app/components/internal-portal-frame'
+import { getUserRole } from '@/lib/auth/get-user-role'
+import { formatCaseStatus } from '@/lib/case-status'
+import { getClinicContextResult } from '@/lib/clinic-auth'
+import { resolveCaseDisplayStatus } from '@/lib/resolve-case-display-status'
+import { createServiceRoleSupabase } from '@/lib/supabase/server'
+
+type CaseRow = {
+  id: string
+  case_number: string | null
+  pet_name: string | null
+  owner_name: string | null
+  clinic_name: string | null
+  status: string | null
+  created_at: string | null
+}
 
 type CaseEventRow = {
   case_id: string
   event_type: string
+  created_at: string
 }
 
 function getStatusClasses(status: string | null) {
@@ -22,28 +40,79 @@ function getStatusClasses(status: string | null) {
 }
 
 export default async function CasesPage() {
-  const supabase = createServerSupabase()
+  const userRole = await getUserRole()
 
-  const { data: cases, error } = await supabase
+  if (!userRole) {
+    redirect('/clinic/login')
+  }
+
+  const isClinicUser = userRole.role === 'clinic_user'
+  let clinicContext:
+    | {
+        clinicName: string
+        clinicLogoPath: string | null
+      }
+    | null = null
+
+  if (isClinicUser) {
+    const clinicResult = await getClinicContextResult()
+
+    if (!clinicResult) {
+      redirect('/clinic/login')
+    }
+
+    if (clinicResult.kind === 'blocked') {
+      return <ClinicAccessBlocked message={clinicResult.message} />
+    }
+
+    clinicContext = {
+      clinicName: clinicResult.clinic.clinicName,
+      clinicLogoPath: clinicResult.clinic.clinicLogoPath,
+    }
+  }
+
+  const supabase = createServiceRoleSupabase()
+
+  let query = supabase
     .from('cases')
-    .select('*')
+    .select('id, case_number, pet_name, owner_name, clinic_name, status, created_at')
     .order('created_at', { ascending: false })
-    .limit(50)
+    .limit(100)
+
+  if (isClinicUser) {
+    query = query.eq('clinic_id', userRole.clinicId)
+  }
+
+  const { data: cases, error } = await query
 
   if (error) {
-    return (
-      <main className="min-h-screen bg-[#f4f3ee] px-6 py-8 md:px-10">
-        <div className="mx-auto max-w-7xl">
+    const errorContent = (
+      <section className="rounded-[28px] bg-white p-8 shadow-sm">
+        <div>
           <h1 className="text-4xl font-bold tracking-tight text-slate-900 md:text-5xl">
             Cases
           </h1>
-          <p className="mt-3 text-xl text-slate-500">Error loading cases: {error.message}</p>
+          <p className="mt-3 text-xl text-slate-500">Unable to load cases.</p>
         </div>
-      </main>
+      </section>
     )
+
+    if (clinicContext) {
+      return (
+        <ClinicPortalFrame
+          clinicName={clinicContext.clinicName}
+          clinicLogoPath={clinicContext.clinicLogoPath}
+        >
+          {errorContent}
+        </ClinicPortalFrame>
+      )
+    }
+
+    return <InternalPortalFrame>{errorContent}</InternalPortalFrame>
   }
 
-  const caseIds = cases?.map((caseItem) => caseItem.id) ?? []
+  const caseRows = (cases as CaseRow[] | null) ?? []
+  const caseIds = caseRows.map((caseItem) => caseItem.id)
   let latestEventsByCaseId = new Map<string, CaseEventRow[]>()
 
   if (caseIds.length > 0) {
@@ -56,90 +125,111 @@ export default async function CasesPage() {
     latestEventsByCaseId = new Map(
       caseIds.map((caseId) => [
         caseId,
-        ((caseEvents as Array<CaseEventRow & { created_at: string }> | null) ?? []).filter(
-          (event) => event.case_id === caseId
-        ),
+        ((caseEvents as CaseEventRow[] | null) ?? []).filter((event) => event.case_id === caseId),
       ])
     )
   }
 
-  return (
-    <main className="min-h-screen bg-[#f4f3ee] px-6 py-8 md:px-10">
-      <div className="mx-auto max-w-7xl">
+  const rows = caseRows.map((caseItem) => {
+    const displayedStatus = resolveCaseDisplayStatus(
+      caseItem.status,
+      latestEventsByCaseId.get(caseItem.id)
+    )
+
+    return {
+      ...caseItem,
+      displayedStatus,
+    }
+  })
+
+  const pageContent = (
+    <section className="rounded-[28px] bg-white p-8 shadow-sm">
+      <div>
         <h1 className="text-4xl font-bold tracking-tight text-slate-900 md:text-5xl">
           Cases
         </h1>
         <p className="mt-3 text-xl text-slate-500">
-          View and manage saved cases.
+          {isClinicUser ? 'Your clinic cases.' : 'View and manage saved cases.'}
         </p>
-
-        <div className="mt-8 space-y-4">
-          {cases?.map((caseItem) => {
-            const displayedStatus = resolveCaseDisplayStatus(
-              caseItem.status,
-              latestEventsByCaseId.get(caseItem.id)
-            )
-
-            return (
-              <Link key={caseItem.id} href={`/cases/${caseItem.id}`}>
-                <div className="rounded-[28px] bg-white p-6 shadow-sm cursor-pointer hover:shadow-md transition-shadow">
-                <div className="flex justify-between items-start mb-4">
-                  <div></div>
-                  <span
-                    className={`px-3 py-1 rounded-full text-sm font-medium ${getStatusClasses(displayedStatus)}`}
-                  >
-                    {formatCaseStatus(displayedStatus)}
-                  </span>
-                </div>
-                <div className="grid gap-4 md:grid-cols-7">
-                  <div>
-                    <div className="text-sm font-medium text-slate-500">Case Number</div>
-                    <div className="text-lg font-semibold text-slate-900">{caseItem.case_number}</div>
-                  </div>
-                  <div>
-                    <div className="text-sm font-medium text-slate-500">Pet Name</div>
-                    <div className="text-lg font-semibold text-slate-900">{caseItem.pet_name}</div>
-                  </div>
-                  <div>
-                    <div className="text-sm font-medium text-slate-500">Owner Name</div>
-                    <div className="text-lg font-semibold text-slate-900">{caseItem.owner_name}</div>
-                  </div>
-                  <div>
-                    <div className="text-sm font-medium text-slate-500">Clinic</div>
-                    <div className="text-lg font-semibold text-slate-900">{caseItem.clinic_name || '—'}</div>
-                  </div>
-                  <div>
-                    <div className="text-sm font-medium text-slate-500">Cremation Type</div>
-                    <div className="text-lg font-semibold text-slate-900">{caseItem.cremation_type || '—'}</div>
-                  </div>
-                  <div>
-                    <div className="text-sm font-medium text-slate-500">Total</div>
-                    <div className="text-lg font-semibold text-slate-900">{caseItem.total ? `$${caseItem.total.toFixed(2)}` : '—'}</div>
-                  </div>
-                  <div>
-                    <div className="text-sm font-medium text-slate-500">Created</div>
-                    <div className="text-lg font-semibold text-slate-900">
-                      {new Date(caseItem.created_at).toLocaleDateString('en-US', {
-                        month: 'short',
-                        day: 'numeric',
-                        year: 'numeric',
-                        hour: '2-digit',
-                        minute: '2-digit',
-                      })}
-                    </div>
-                  </div>
-                </div>
-              </div>
-              </Link>
-            )
-          })}
-          {(!cases || cases.length === 0) && (
-            <div className="rounded-[28px] bg-white p-6 shadow-sm">
-              <p className="text-lg text-slate-600">No cases found.</p>
-            </div>
-          )}
-        </div>
       </div>
-    </main>
+
+      <div className="mt-8 overflow-hidden rounded-[22px] border border-slate-200">
+        {rows.length === 0 ? (
+          <div className="p-6">
+            <p className="text-lg text-slate-600">No cases found.</p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="min-w-full border-collapse">
+              <thead className="bg-slate-50">
+                <tr className="text-left">
+                  <th className="px-6 py-4 text-sm font-semibold text-slate-600">Case Number</th>
+                  <th className="px-6 py-4 text-sm font-semibold text-slate-600">Pet Name</th>
+                  <th className="px-6 py-4 text-sm font-semibold text-slate-600">Owner Name</th>
+                  {!isClinicUser ? (
+                    <th className="px-6 py-4 text-sm font-semibold text-slate-600">Clinic</th>
+                  ) : null}
+                  <th className="px-6 py-4 text-sm font-semibold text-slate-600">
+                    Displayed Status
+                  </th>
+                  <th className="px-6 py-4 text-sm font-semibold text-slate-600">Created</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((caseItem) => (
+                  <tr key={caseItem.id} className="border-t border-slate-200">
+                    <td className="px-6 py-4 text-sm font-semibold text-slate-900">
+                      <Link href={`/cases/${caseItem.id}`} className="hover:underline">
+                        {caseItem.case_number || '—'}
+                      </Link>
+                    </td>
+                    <td className="px-6 py-4 text-sm text-slate-700">{caseItem.pet_name || '—'}</td>
+                    <td className="px-6 py-4 text-sm text-slate-700">
+                      {caseItem.owner_name || '—'}
+                    </td>
+                    {!isClinicUser ? (
+                      <td className="px-6 py-4 text-sm text-slate-700">
+                        {caseItem.clinic_name || '—'}
+                      </td>
+                    ) : null}
+                    <td className="px-6 py-4 text-sm">
+                      <span
+                        className={`rounded-full px-3 py-1 font-medium ${getStatusClasses(caseItem.displayedStatus)}`}
+                      >
+                        {formatCaseStatus(caseItem.displayedStatus)}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 text-sm text-slate-700">
+                      {caseItem.created_at
+                        ? new Date(caseItem.created_at).toLocaleString('en-US', {
+                            month: 'short',
+                            day: 'numeric',
+                            year: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })
+                        : '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </section>
   )
+
+  if (clinicContext) {
+    return (
+      <ClinicPortalFrame
+        clinicName={clinicContext.clinicName}
+        clinicLogoPath={clinicContext.clinicLogoPath}
+      >
+        {pageContent}
+      </ClinicPortalFrame>
+    )
+  }
+
+  return <InternalPortalFrame>{pageContent}</InternalPortalFrame>
 }

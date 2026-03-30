@@ -1,4 +1,4 @@
-import { createServerAuthSupabase } from '@/lib/supabase/server'
+import { getUserRole } from '@/lib/auth/get-user-role'
 
 export type TemporaryHorizonAdmin = {
   userId: string
@@ -15,40 +15,14 @@ type TemporaryHorizonAdminResult =
       message: string
     }
 
-async function getAuthenticatedAdminUser() {
-  const supabase = await createServerAuthSupabase()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-
-  return user ?? null
-}
-
 export async function getTemporaryHorizonAdminResult(): Promise<TemporaryHorizonAdminResult | null> {
-  const user = await getAuthenticatedAdminUser()
+  const userRole = await getUserRole()
 
-  if (!user) {
+  if (!userRole) {
     return null
   }
 
-  const rawAllowedEmail = process.env.HORIZON_ADMIN_EMAIL ?? ''
-  const rawUserEmail = user.email ?? ''
-  const allowedEmail = rawAllowedEmail.trim().toLowerCase()
-  const userEmail = rawUserEmail.trim().toLowerCase()
-
-  console.log('Temporary Horizon Admin email check', {
-    userEmail: rawUserEmail,
-    allowedEmail: rawAllowedEmail,
-  })
-
-  if (!allowedEmail) {
-    return {
-      kind: 'blocked',
-      message: 'Temporary Horizon Admin access is not configured.',
-    }
-  }
-
-  if (!userEmail || userEmail !== allowedEmail) {
+  if (userRole.role !== 'admin') {
     return {
       kind: 'blocked',
       message: 'This account is not allowed to access Horizon Admin testing tools.',
@@ -58,8 +32,8 @@ export async function getTemporaryHorizonAdminResult(): Promise<TemporaryHorizon
   return {
     kind: 'ok',
     admin: {
-      userId: user.id,
-      email: user.email ?? '',
+      userId: userRole.userId,
+      email: userRole.email ?? '',
     },
   }
 }

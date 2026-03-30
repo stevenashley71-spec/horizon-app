@@ -2,8 +2,8 @@
 
 import { revalidatePath } from 'next/cache'
 
-import { requireHorizonAdmin } from '@/lib/horizon-admin'
-import { createServerSupabase } from '@/lib/supabase/server'
+import { getTemporaryHorizonAdminResult } from '@/lib/admin-auth'
+import { createServerSupabase, createServiceRoleSupabase } from '@/lib/supabase/server'
 
 const CLINIC_LOGO_BUCKET = 'clinic-logos'
 const MAX_LOGO_SIZE_BYTES = 5 * 1024 * 1024
@@ -29,7 +29,7 @@ async function uploadClinicLogo(clinicId: string, file: File) {
     throw new Error('Logo must be 5MB or smaller')
   }
 
-  const supabase = createServerSupabase()
+  const supabase = createServiceRoleSupabase()
   const filePath = getLogoPath(clinicId, file.name)
   const fileBuffer = await file.arrayBuffer()
 
@@ -52,14 +52,26 @@ async function removeClinicLogoIfPresent(logoPath: string | null | undefined) {
     return
   }
 
-  const supabase = createServerSupabase()
+  const supabase = createServiceRoleSupabase()
   await supabase.storage.from(CLINIC_LOGO_BUCKET).remove([logoPath])
 }
 
-export async function saveClinicAdmin(formData: FormData) {
-  requireHorizonAdmin()
+async function requireTemporaryAdminAccess() {
+  const adminResult = await getTemporaryHorizonAdminResult()
 
-  const supabase = createServerSupabase()
+  if (!adminResult) {
+    throw new Error('Authentication required')
+  }
+
+  if (adminResult.kind !== 'ok') {
+    throw new Error(adminResult.message)
+  }
+}
+
+export async function saveClinicAdmin(formData: FormData) {
+  await requireTemporaryAdminAccess()
+
+  const supabase = createServiceRoleSupabase()
 
   const clinicIdValue = formData.get('clinic_id')
   const clinicId = typeof clinicIdValue === 'string' && clinicIdValue ? clinicIdValue : null
@@ -180,9 +192,9 @@ export async function saveClinicAdmin(formData: FormData) {
 }
 
 export async function setClinicActive(clinicId: string, isActive: boolean) {
-  requireHorizonAdmin()
+  await requireTemporaryAdminAccess()
 
-  const supabase = createServerSupabase()
+  const supabase = createServiceRoleSupabase()
 
   const { error } = await supabase
     .from('clinics')
