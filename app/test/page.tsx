@@ -1,7 +1,7 @@
 import { createServerSupabase } from '@/lib/supabase/server'
 
 export default async function TestPage() {
-  const supabase = createServerSupabase()
+  const supabase = await createServerSupabase()
 
   const { data, error } = await supabase
     .from('cases')
