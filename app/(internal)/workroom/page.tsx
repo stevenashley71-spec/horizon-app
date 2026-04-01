@@ -1,11 +1,8 @@
 import Link from 'next/link'
 
 import { formatCaseEventType } from '@/lib/case-events'
-import {
-  getCurrentWorkflowStep,
-  getNextAllowedEventType,
-} from '@/lib/case-workflow'
 import { createServiceRoleSupabase } from '@/lib/supabase/server'
+import { resolveWorkflow } from '@/lib/workflow/resolve-workflow'
 
 import AutoRefresh from './auto-refresh'
 import DisplayModeWrapper from './display-mode-wrapper'
@@ -39,8 +36,9 @@ type CaseEventRow = {
 type WorkroomCase = {
   id: string
   caseNumber: string
-  currentWorkflowStep: string | null
-  nextRequiredEvent: string | null
+  currentStep: string | null
+  nextStep: string | null
+  isComplete: boolean
   lastEventTime: string | null
   lastEventUser: string | null
   location: string | null
@@ -51,7 +49,6 @@ type WorkroomCase = {
   petName: string | null
   cremationType: string | null
   memorialItems: Array<{ item_id: string; item_name: string; qty: number }>
-  terminalEventType: string | null
   terminalEventTime: string | null
   terminalEventUser: string | null
 }
@@ -60,6 +57,16 @@ type SummaryCard = {
   label: string
   value: number
 }
+
+const sectionTitleClass = 'text-[clamp(1.5rem,1.1rem+1vw,2rem)] font-semibold text-slate-900'
+const cardLabelClass =
+  'text-[clamp(0.7rem,0.66rem+0.2vw,0.8rem)] font-medium uppercase tracking-wide text-slate-500'
+const cardValueLargeClass = 'text-[clamp(1rem,0.9rem+0.45vw,1.2rem)] font-semibold'
+const metadataValueClass = 'text-[clamp(0.82rem,0.78rem+0.16vw,0.9rem)] font-semibold text-slate-900'
+const summaryValueClass = 'text-[clamp(1.2rem,0.9rem+1vw,1.8rem)] font-bold text-slate-900'
+const columnCellClass = 'min-w-0'
+const oneLineValueClass = 'overflow-hidden text-ellipsis whitespace-nowrap'
+const oneLineMetadataClass = 'overflow-hidden text-ellipsis whitespace-nowrap'
 
 function getCustodyAgeDays(createdAt: string | null) {
   if (!createdAt) return null
@@ -117,12 +124,6 @@ function formatWeight(weight: string | number | null) {
   return hasUnits ? normalizedWeight : `${normalizedWeight} lbs`
 }
 
-function isGeneralCase(caseItem: Pick<WorkroomCase, 'cremationType'>) {
-  const cremationType = caseItem.cremationType?.trim().toLowerCase()
-
-  return cremationType === 'general' || cremationType === 'communal'
-}
-
 function isGeneralPrintNeeded(caseItem: Pick<WorkroomCase, 'memorialItems'>) {
   return caseItem.memorialItems.some((item) => {
     const itemName = item.item_name?.trim().toLowerCase() ?? ''
@@ -136,14 +137,6 @@ function isGeneralPrintNeeded(caseItem: Pick<WorkroomCase, 'memorialItems'>) {
   })
 }
 
-function getTerminalEventType(caseItem: Pick<WorkroomCase, 'cremationType'>) {
-  return isGeneralCase(caseItem) ? 'scattered' : 'returned'
-}
-
-function isTerminalComplete(caseItem: Pick<WorkroomCase, 'currentWorkflowStep' | 'cremationType'>) {
-  return caseItem.currentWorkflowStep === getTerminalEventType(caseItem)
-}
-
 function isWithinRecentCompletedWindow(timestamp: string | null) {
   if (!timestamp) {
     return false
@@ -154,30 +147,36 @@ function isWithinRecentCompletedWindow(timestamp: string | null) {
   return diffMs <= RECENT_COMPLETED_WINDOW_HOURS * 60 * 60 * 1000
 }
 
-function getOperationalPriorityRank(caseItem: WorkroomCase) {
-  return caseItem.nextRequiredEvent === 'cremation_started' ? 0 : 1
-}
-
 function getCreatedAtTime(createdAt: string | null) {
   return createdAt ? new Date(createdAt).getTime() : Number.POSITIVE_INFINITY
 }
 
-function sortOperationalCases(a: WorkroomCase, b: WorkroomCase) {
-  const aUrgencyRank = getUrgencyRank(a.createdAt)
-  const bUrgencyRank = getUrgencyRank(b.createdAt)
-
-  if (aUrgencyRank !== bUrgencyRank) {
-    return aUrgencyRank - bUrgencyRank
-  }
-
-  const aOperationalRank = getOperationalPriorityRank(a)
-  const bOperationalRank = getOperationalPriorityRank(b)
-
-  if (aOperationalRank !== bOperationalRank) {
-    return aOperationalRank - bOperationalRank
-  }
-
+function sortCasesByCreatedAt(a: WorkroomCase, b: WorkroomCase) {
   return getCreatedAtTime(a.createdAt) - getCreatedAtTime(b.createdAt)
+}
+
+async function findCompletionEvent(params: {
+  caseId: string
+  cremationType: 'private' | 'general'
+  caseEvents: CaseEventRow[]
+}) {
+  for (let index = 0; index < params.caseEvents.length; index += 1) {
+    const event = params.caseEvents[index]
+    const workflowAtEvent = await resolveWorkflow({
+      caseId: params.caseId,
+      cremationType: params.cremationType,
+      events: params.caseEvents.slice(0, index + 1).map((caseEvent) => ({
+        event_type: caseEvent.event_type,
+        created_at: caseEvent.created_at,
+      })),
+    })
+
+    if (workflowAtEvent.isComplete) {
+      return event
+    }
+  }
+
+  return null
 }
 
 function SummaryRow({ cards }: { cards: SummaryCard[] }) {
@@ -186,14 +185,10 @@ function SummaryRow({ cards }: { cards: SummaryCard[] }) {
       {cards.map((card) => (
         <div
           key={card.label}
-          className="rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm"
+          className="rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm"
         >
-          <div className="text-xs font-medium uppercase tracking-wide text-slate-500">
-            {card.label}
-          </div>
-          <div className="mt-2 text-2xl font-bold text-slate-900 group-data-[display-mode=on]/workroom:text-3xl">
-            {card.value}
-          </div>
+          <div className={cardLabelClass}>{card.label}</div>
+          <div className={`mt-1 ${summaryValueClass}`}>{card.value}</div>
         </div>
       ))}
     </section>
@@ -204,9 +199,7 @@ function PrivateBoardSection({ cases }: { cases: WorkroomCase[] }) {
   return (
     <section className="rounded-[28px] bg-white p-6 shadow-sm group-data-[display-mode=on]/workroom:p-8">
       <div className="flex items-center justify-between gap-3">
-        <h2 className="text-2xl font-semibold text-slate-900 group-data-[display-mode=on]/workroom:text-3xl">
-          {`Privates (${cases.length})`}
-        </h2>
+        <h2 className={sectionTitleClass}>{`Privates (${cases.length})`}</h2>
         <div className="text-sm text-slate-500">One prioritized operational list</div>
       </div>
 
@@ -222,8 +215,8 @@ function PrivateBoardSection({ cases }: { cases: WorkroomCase[] }) {
                 key={caseItem.id}
                 className="rounded-2xl border border-slate-200 px-4 py-3"
               >
-                <div className="grid gap-3 md:grid-cols-8">
-                  <div>
+                <div className="grid gap-3 md:grid-cols-9">
+                  <div className={columnCellClass}>
                     {urgency ? (
                       <div
                         className={`mb-2 inline-flex rounded-full px-2 py-1 text-xs font-semibold ${
@@ -235,68 +228,60 @@ function PrivateBoardSection({ cases }: { cases: WorkroomCase[] }) {
                         {urgency.label}
                       </div>
                     ) : null}
-                    <div className="text-xs font-medium uppercase tracking-wide text-slate-500">
-                      Case Number
-                    </div>
-                    <div className={`text-lg font-semibold ${textClass} group-data-[display-mode=on]/workroom:text-2xl`}>
+                    <div className={cardLabelClass}>Case Number</div>
+                    <div className={`${cardValueLargeClass} ${textClass} ${oneLineValueClass}`}>
                       {caseItem.caseNumber}
                     </div>
                   </div>
-                  <div>
-                    <div className="text-xs font-medium uppercase tracking-wide text-slate-500">
-                      Pet Name
-                    </div>
-                    <div className="text-lg font-semibold text-slate-900">
-                      {caseItem.petName || '—'}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-xs font-medium uppercase tracking-wide text-slate-500">
-                      Clinic
-                    </div>
-                    <div className="text-sm font-semibold text-slate-900">
-                      {caseItem.clinicName || '—'}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-xs font-medium uppercase tracking-wide text-slate-500">
-                      Current Location
-                    </div>
-                    <div className="text-lg font-semibold text-slate-900 group-data-[display-mode=on]/workroom:text-2xl">
-                      {caseItem.location || 'Unassigned'}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-xs font-medium uppercase tracking-wide text-slate-500">
-                      Next Required Step
-                    </div>
-                    <div className={`text-lg font-semibold ${textClass} group-data-[display-mode=on]/workroom:text-2xl`}>
-                      {caseItem.nextRequiredEvent
-                        ? formatCaseEventType(caseItem.nextRequiredEvent)
-                        : '—'}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-xs font-medium uppercase tracking-wide text-slate-500">
-                      Days in Custody
-                    </div>
-                    <div className={`text-sm font-semibold ${textClass}`}>
+                  <div className={columnCellClass}>
+                    <div className={cardLabelClass}>Days in Custody</div>
+                    <div className={`${metadataValueClass} ${textClass} ${oneLineMetadataClass}`}>
                       {custodyAgeDays === null ? '—' : `${custodyAgeDays} days`}
                     </div>
                   </div>
-                  <div>
-                    <div className="text-xs font-medium uppercase tracking-wide text-slate-500">
-                      Last Handled By
+                  <div className={columnCellClass}>
+                    <div className={cardLabelClass}>Current Location</div>
+                    <div className={`${cardValueLargeClass} text-slate-900 ${oneLineValueClass}`}>
+                      {caseItem.location || 'Unassigned'}
                     </div>
-                    <div className="text-sm font-semibold text-slate-900">
+                  </div>
+                  <div className={columnCellClass}>
+                    <div className={cardLabelClass}>Pet Name</div>
+                    <div className={`${cardValueLargeClass} text-slate-900 ${oneLineValueClass}`}>
+                      {caseItem.petName || '—'}
+                    </div>
+                  </div>
+                  <div className={columnCellClass}>
+                    <div className={cardLabelClass}>Current Step</div>
+                    <div className={`${cardValueLargeClass} ${textClass} ${oneLineValueClass}`}>
+                      {caseItem.currentStep
+                        ? formatCaseEventType(caseItem.currentStep)
+                        : '—'}
+                    </div>
+                  </div>
+                  <div className={columnCellClass}>
+                    <div className={cardLabelClass}>Next Required Step</div>
+                    <div className={`${cardValueLargeClass} ${textClass} ${oneLineValueClass}`}>
+                      {caseItem.nextStep
+                        ? formatCaseEventType(caseItem.nextStep)
+                        : '—'}
+                    </div>
+                  </div>
+                  <div className={columnCellClass}>
+                    <div className={cardLabelClass}>Clinic</div>
+                    <div className={`${metadataValueClass} ${oneLineMetadataClass}`}>
+                      {caseItem.clinicName || '—'}
+                    </div>
+                  </div>
+                  <div className={columnCellClass}>
+                    <div className={cardLabelClass}>Last Handled By</div>
+                    <div className={`${metadataValueClass} ${oneLineMetadataClass}`}>
                       {caseItem.lastEventUser || 'Unassigned'}
                     </div>
                   </div>
-                  <div>
-                    <div className="text-xs font-medium uppercase tracking-wide text-slate-500">
-                      Last Updated
-                    </div>
-                    <div className="text-sm font-semibold text-slate-900">
+                  <div className={columnCellClass}>
+                    <div className={cardLabelClass}>Last Updated</div>
+                    <div className={`${metadataValueClass} ${oneLineMetadataClass}`}>
                       {caseItem.lastEventTime
                         ? new Date(caseItem.lastEventTime).toLocaleString()
                         : '—'}
@@ -327,9 +312,7 @@ function GeneralBoardSection({
     <section className="rounded-[28px] bg-white p-6 shadow-sm group-data-[display-mode=on]/workroom:p-8">
       <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
         <div>
-          <h2 className="text-2xl font-semibold text-slate-900 group-data-[display-mode=on]/workroom:text-3xl">
-            {`Generals (${cases.length})`}
-          </h2>
+          <h2 className={sectionTitleClass}>{`Generals (${cases.length})`}</h2>
           <div className="text-sm text-slate-500">
             {`Total Weight to be Cremated: ${totalWeightLbs} lbs`}
           </div>
@@ -352,7 +335,7 @@ function GeneralBoardSection({
                 className="rounded-2xl border border-slate-200 px-4 py-3"
               >
                 <div className="grid gap-3 md:grid-cols-10">
-                  <div>
+                  <div className={columnCellClass}>
                     {urgency ? (
                       <div
                         className={`mb-2 inline-flex rounded-full px-2 py-1 text-xs font-semibold ${
@@ -364,87 +347,67 @@ function GeneralBoardSection({
                         {urgency.label}
                       </div>
                     ) : null}
-                    <div className="text-xs font-medium uppercase tracking-wide text-slate-500">
-                      Case Number
-                    </div>
-                    <div className={`text-lg font-semibold ${textClass} group-data-[display-mode=on]/workroom:text-2xl`}>
+                    <div className={cardLabelClass}>Case Number</div>
+                    <div className={`${cardValueLargeClass} ${textClass} ${oneLineValueClass}`}>
                       {caseItem.caseNumber}
                     </div>
                   </div>
-                  <div>
-                    <div className="text-xs font-medium uppercase tracking-wide text-slate-500">
-                      Pet Name
-                    </div>
-                    <div className="text-lg font-semibold text-slate-900">
-                      {caseItem.petName || '—'}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-xs font-medium uppercase tracking-wide text-slate-500">
-                      Clinic
-                    </div>
-                    <div className="text-sm font-semibold text-slate-900">
-                      {caseItem.clinicName || '—'}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-xs font-medium uppercase tracking-wide text-slate-500">
-                      Weight
-                    </div>
-                    <div className={`text-lg font-semibold ${textClass}`}>
-                      {formatWeight(caseItem.weight)}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-xs font-medium uppercase tracking-wide text-slate-500">
-                      Current Location
-                    </div>
-                    <div className={`text-lg font-semibold ${textClass} group-data-[display-mode=on]/workroom:text-2xl`}>
-                      {caseItem.location || 'Unassigned'}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-xs font-medium uppercase tracking-wide text-slate-500">
-                      Next Required Step
-                    </div>
-                    <div className={`text-lg font-semibold ${textClass} group-data-[display-mode=on]/workroom:text-2xl`}>
-                      {caseItem.nextRequiredEvent
-                        ? formatCaseEventType(caseItem.nextRequiredEvent)
-                        : '—'}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-xs font-medium uppercase tracking-wide text-slate-500">
-                      Days in Custody
-                    </div>
-                    <div className={`text-sm font-semibold ${textClass}`}>
+                  <div className={columnCellClass}>
+                    <div className={cardLabelClass}>Days in Custody</div>
+                    <div className={`${metadataValueClass} ${textClass} ${oneLineMetadataClass}`}>
                       {custodyAgeDays === null ? '—' : `${custodyAgeDays} days`}
                     </div>
                   </div>
-                  <div>
-                    <div className="text-xs font-medium uppercase tracking-wide text-slate-500">
-                      Prints Needed
-                    </div>
-                    <div className={`text-sm font-semibold ${textClass}`}>
-                      {printsNeeded ? 'Yes' : 'No'}
+                  <div className={columnCellClass}>
+                    <div className={cardLabelClass}>Current Location</div>
+                    <div className={`${cardValueLargeClass} ${textClass} ${oneLineValueClass}`}>
+                      {caseItem.location || 'Unassigned'}
                     </div>
                   </div>
-                  <div>
-                    <div className="text-xs font-medium uppercase tracking-wide text-slate-500">
-                      Last Handled By
+                  <div className={columnCellClass}>
+                    <div className={cardLabelClass}>Pet Name</div>
+                    <div className={`${cardValueLargeClass} text-slate-900 ${oneLineValueClass}`}>
+                      {caseItem.petName || '—'}
                     </div>
-                    <div className="text-sm font-semibold text-slate-900">
+                  </div>
+                  <div className={columnCellClass}>
+                    <div className={cardLabelClass}>Next Workflow Step</div>
+                    <div className={`${cardValueLargeClass} ${textClass} ${oneLineValueClass}`}>
+                      {caseItem.nextStep
+                        ? formatCaseEventType(caseItem.nextStep)
+                        : '—'}
+                    </div>
+                  </div>
+                  <div className={columnCellClass}>
+                    <div className={cardLabelClass}>Clinic</div>
+                    <div className={`${metadataValueClass} ${oneLineMetadataClass}`}>
+                      {caseItem.clinicName || '—'}
+                    </div>
+                  </div>
+                  <div className={columnCellClass}>
+                    <div className={cardLabelClass}>Last Handled By</div>
+                    <div className={`${metadataValueClass} ${oneLineMetadataClass}`}>
                       {caseItem.lastEventUser || 'Unassigned'}
                     </div>
                   </div>
-                  <div>
-                    <div className="text-xs font-medium uppercase tracking-wide text-slate-500">
-                      Last Updated
-                    </div>
-                    <div className="text-sm font-semibold text-slate-900">
+                  <div className={columnCellClass}>
+                    <div className={cardLabelClass}>Last Updated</div>
+                    <div className={`${metadataValueClass} ${oneLineMetadataClass}`}>
                       {caseItem.lastEventTime
                         ? new Date(caseItem.lastEventTime).toLocaleString()
                         : '—'}
+                    </div>
+                  </div>
+                  <div className={columnCellClass}>
+                    <div className={cardLabelClass}>Case Weight</div>
+                    <div className={`${cardValueLargeClass} ${textClass} ${oneLineValueClass}`}>
+                      {formatWeight(caseItem.weight)}
+                    </div>
+                  </div>
+                  <div className={columnCellClass}>
+                    <div className={cardLabelClass}>Prints Needed</div>
+                    <div className={`${metadataValueClass} ${textClass} ${oneLineMetadataClass}`}>
+                      {printsNeeded ? 'Yes' : 'No'}
                     </div>
                   </div>
                 </div>
@@ -466,28 +429,16 @@ function RecentCompletedSection({
 }: {
   cases: WorkroomCase[]
 }) {
-  const titleClass =
-    'text-2xl group-data-[display-mode=on]/workroom:text-3xl group-data-[display-mode=on]/workroom:md:text-4xl'
-  const valueClass =
-    'text-lg group-data-[display-mode=on]/workroom:text-2xl group-data-[display-mode=on]/workroom:md:text-3xl'
-
   if (cases.length === 0) {
     return null
   }
 
   return (
     <section className="rounded-[28px] bg-white p-6 shadow-sm group-data-[display-mode=on]/workroom:p-8">
-      <h2 className={`${titleClass} font-semibold text-slate-900`}>
-        {`Recent Completed (${cases.length})`}
-      </h2>
+      <h2 className={sectionTitleClass}>{`Recent Completed (${cases.length})`}</h2>
       <div className="mt-4 space-y-3 group-data-[display-mode=on]/workroom:mt-6 group-data-[display-mode=on]/workroom:space-y-4">
         {cases.map((caseItem) => {
-          const terminalLabel =
-            caseItem.terminalEventType === 'scattered' ? 'Scattered' : 'Returned'
-          const terminalBadgeClasses =
-            caseItem.terminalEventType === 'scattered'
-              ? 'bg-slate-900 text-white'
-              : 'bg-emerald-600 text-white'
+          const terminalBadgeClasses = 'bg-slate-900 text-white'
 
           return (
             <div
@@ -495,66 +446,52 @@ function RecentCompletedSection({
               className="rounded-2xl border border-slate-200 px-4 py-3"
             >
               <div className="grid gap-3 md:grid-cols-8">
-                <div>
-                  <div className="text-xs font-medium uppercase tracking-wide text-slate-500">
-                    Pet Name
-                  </div>
-                  <div className={`${valueClass} font-semibold text-slate-900`}>
-                    {caseItem.petName || '—'}
-                  </div>
-                </div>
-                <div>
-                  <div className="text-xs font-medium uppercase tracking-wide text-slate-500">
-                    Case Number
-                  </div>
-                  <div className={`${valueClass} font-semibold text-slate-900`}>
+                <div className={columnCellClass}>
+                  <div className={cardLabelClass}>Case Number</div>
+                  <div className={`${cardValueLargeClass} text-slate-900 ${oneLineValueClass}`}>
                     {caseItem.caseNumber}
                   </div>
                 </div>
-                <div>
-                  <div className="text-xs font-medium uppercase tracking-wide text-slate-500">
-                    Clinic
+                <div className={columnCellClass}>
+                  <div className={cardLabelClass}>Pet Name</div>
+                  <div className={`${cardValueLargeClass} text-slate-900 ${oneLineValueClass}`}>
+                    {caseItem.petName || '—'}
                   </div>
-                  <div className="text-sm font-semibold text-slate-900">
+                </div>
+                <div className={columnCellClass}>
+                  <div className={cardLabelClass}>Clinic</div>
+                  <div className={`${metadataValueClass} ${oneLineMetadataClass}`}>
                     {caseItem.clinicName || '—'}
                   </div>
                 </div>
-                <div>
-                  <div className="text-xs font-medium uppercase tracking-wide text-slate-500">
-                    Cremation Type
-                  </div>
-                  <div className="text-sm font-semibold text-slate-900">
-                    {caseItem.cremationType || '—'}
-                  </div>
-                </div>
-                <div>
-                  <div className="text-xs font-medium uppercase tracking-wide text-slate-500">
-                    Terminal
-                  </div>
-                  <div className="mt-1">
-                    <span
-                      className={`inline-flex rounded-full px-3 py-1 text-sm font-semibold ${terminalBadgeClasses}`}
-                    >
-                      {terminalLabel}
-                    </span>
-                  </div>
-                </div>
-                <div>
-                  <div className="text-xs font-medium uppercase tracking-wide text-slate-500">
-                    Completed At
-                  </div>
-                  <div className="text-sm font-semibold text-slate-900">
+                <div className={columnCellClass}>
+                  <div className={cardLabelClass}>Completed At</div>
+                  <div className={`${metadataValueClass} ${oneLineMetadataClass}`}>
                     {caseItem.terminalEventTime
                       ? new Date(caseItem.terminalEventTime).toLocaleString()
                       : '—'}
                   </div>
                 </div>
-                <div>
-                  <div className="text-xs font-medium uppercase tracking-wide text-slate-500">
-                    Completed By
-                  </div>
-                  <div className="text-sm font-semibold text-slate-900">
+                <div className={columnCellClass}>
+                  <div className={cardLabelClass}>Completed By</div>
+                  <div className={`${metadataValueClass} ${oneLineMetadataClass}`}>
                     {caseItem.terminalEventUser || 'Unassigned'}
+                  </div>
+                </div>
+                <div className={columnCellClass}>
+                  <div className={cardLabelClass}>Cremation Type</div>
+                  <div className={`${metadataValueClass} ${oneLineMetadataClass}`}>
+                    {caseItem.cremationType || '—'}
+                  </div>
+                </div>
+                <div className={columnCellClass}>
+                  <div className={cardLabelClass}>Terminal</div>
+                  <div className="mt-1">
+                    <span
+                      className={`inline-flex rounded-full px-3 py-1 text-sm font-semibold ${terminalBadgeClasses}`}
+                    >
+                      Completed
+                    </span>
                   </div>
                 </div>
                 <div className="flex items-end">
@@ -613,12 +550,19 @@ export default async function WorkroomPage() {
       throw new Error(usersResponse.error.message)
     }
 
-    eventsByCaseId = new Map(
-      caseIds.map((caseId) => [
-        caseId,
-        ((caseEvents as CaseEventRow[] | null) ?? []).filter((event) => event.case_id === caseId),
-      ])
+    const groupedEventsByCaseId = new Map<string, CaseEventRow[]>(
+      caseIds.map((caseId) => [caseId, []])
     )
+
+    for (const event of ((caseEvents as CaseEventRow[] | null) ?? [])) {
+      const caseEventsForCase = groupedEventsByCaseId.get(event.case_id)
+
+      if (caseEventsForCase) {
+        caseEventsForCase.push(event)
+      }
+    }
+
+    eventsByCaseId = groupedEventsByCaseId
 
     userDisplayById = new Map(
       (usersResponse.data.users ?? []).map((user) => {
@@ -634,25 +578,32 @@ export default async function WorkroomPage() {
     )
   }
 
-  const workroomCases: WorkroomCase[] = caseItems.map((caseItem) => {
+  const workroomCases: WorkroomCase[] = await Promise.all(caseItems.map(async (caseItem) => {
     const caseEvents = eventsByCaseId.get(caseItem.id) ?? []
     const latestEvent = caseEvents[caseEvents.length - 1]
-    const workflowOptions = { cremationType: caseItem.cremation_type }
-    const terminalEventType = getTerminalEventType({
-      cremationType: caseItem.cremation_type,
+    const cremationType = caseItem.cremation_type === 'general' ? 'general' : 'private'
+    const workflow = await resolveWorkflow({
+      caseId: caseItem.id,
+      cremationType,
+      events: caseEvents.map((event) => ({
+        event_type: event.event_type,
+        created_at: event.created_at,
+      })),
     })
-    const terminalEvent =
-      caseEvents
-        .filter((event) => event.event_type === terminalEventType)
-        .sort((a, b) => {
-          return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-        })[0] ?? null
+    const completionEvent = workflow.isComplete
+      ? await findCompletionEvent({
+          caseId: caseItem.id,
+          cremationType,
+          caseEvents,
+        })
+      : null
 
     return {
       id: caseItem.id,
       caseNumber: caseItem.case_number,
-      currentWorkflowStep: getCurrentWorkflowStep(caseEvents, workflowOptions),
-      nextRequiredEvent: getNextAllowedEventType(caseEvents, workflowOptions),
+      currentStep: workflow.currentStep,
+      nextStep: workflow.nextStep,
+      isComplete: workflow.isComplete,
       lastEventTime: latestEvent?.created_at ?? null,
       lastEventUser: latestEvent?.created_by
         ? userDisplayById.get(latestEvent.created_by) ?? latestEvent.created_by
@@ -668,16 +619,16 @@ export default async function WorkroomPage() {
       petName: caseItem.pet_name,
       cremationType: caseItem.cremation_type,
       memorialItems: caseItem.memorial_items ?? [],
-      terminalEventType,
-      terminalEventTime: terminalEvent?.created_at ?? null,
-      terminalEventUser: terminalEvent?.created_by
-        ? userDisplayById.get(terminalEvent.created_by) ?? terminalEvent.created_by
-        : null,
+      terminalEventTime: completionEvent?.created_at ?? null,
+      terminalEventUser:
+        completionEvent?.created_by
+          ? userDisplayById.get(completionEvent.created_by) ?? completionEvent.created_by
+          : null,
     }
-  })
+  }))
 
   const recentCompletedCases = workroomCases
-    .filter((caseItem) => isTerminalComplete(caseItem))
+    .filter((caseItem) => caseItem.isComplete)
     .filter((caseItem) => isWithinRecentCompletedWindow(caseItem.terminalEventTime))
     .sort((a, b) => {
       const aTime = a.terminalEventTime ? new Date(a.terminalEventTime).getTime() : 0
@@ -686,22 +637,36 @@ export default async function WorkroomPage() {
       return bTime - aTime
     })
 
-  const activeWorkroomCases = workroomCases.filter((caseItem) => !isTerminalComplete(caseItem))
-  const privateCases = activeWorkroomCases
-    .filter((caseItem) => !isGeneralCase(caseItem))
-    .sort(sortOperationalCases)
-  const generalCases = activeWorkroomCases
-    .filter((caseItem) => isGeneralCase(caseItem))
-    .sort(sortOperationalCases)
+  const activeWorkroomCases = workroomCases
+    .filter((caseItem) => !caseItem.isComplete)
+    .sort(sortCasesByCreatedAt)
+  const privateCases = activeWorkroomCases.filter(
+    (caseItem) => caseItem.cremationType !== 'general'
+  )
+  const orderedPrivateCases = [...privateCases].sort((a, b) => {
+    const aHasNextStep = a.nextStep !== null
+    const bHasNextStep = b.nextStep !== null
+
+    if (aHasNextStep !== bHasNextStep) {
+      return aHasNextStep ? -1 : 1
+    }
+
+    const createdAtDifference = getCreatedAtTime(a.createdAt) - getCreatedAtTime(b.createdAt)
+
+    if (createdAtDifference !== 0) {
+      return createdAtDifference
+    }
+
+    return a.caseNumber.localeCompare(b.caseNumber)
+  })
+  const generalCases = activeWorkroomCases.filter(
+    (caseItem) => caseItem.cremationType === 'general'
+  )
 
   const overdueCount = activeWorkroomCases.filter((caseItem) => {
     const days = getCustodyAgeDays(caseItem.createdAt)
     return days !== null && days >= 5
   }).length
-
-  const readyForCremationCount = activeWorkroomCases.filter(
-    (caseItem) => caseItem.nextRequiredEvent === 'cremation_started'
-  ).length
 
   const totalGeneralWeightLbs = generalCases.reduce((total, caseItem) => {
     return typeof caseItem.weightLbs === 'number' && Number.isFinite(caseItem.weightLbs)
@@ -713,7 +678,7 @@ export default async function WorkroomPage() {
     { label: 'Active Privates', value: privateCases.length },
     { label: 'Active Generals', value: generalCases.length },
     { label: 'Overdue', value: overdueCount },
-    { label: 'Ready for Cremation', value: readyForCremationCount },
+    { label: 'Active Workflow', value: activeWorkroomCases.length },
     { label: 'Recent Completed', value: recentCompletedCases.length },
   ]
 
@@ -724,7 +689,7 @@ export default async function WorkroomPage() {
     >
       <AutoRefresh />
       <SummaryRow cards={summaryCards} />
-      <PrivateBoardSection cases={privateCases} />
+      <PrivateBoardSection cases={orderedPrivateCases} />
       <GeneralBoardSection
         cases={generalCases}
         totalWeightLbs={totalGeneralWeightLbs}

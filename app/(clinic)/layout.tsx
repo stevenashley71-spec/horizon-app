@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation'
 
 import { ClinicAccessBlocked } from '@/app/components/clinic-access-blocked'
-import { getClinicContextResult } from '@/lib/clinic-auth'
+import { getUserRole } from '@/lib/auth/get-user-role'
 import { createServerSupabase } from '@/lib/supabase/server'
 
 import { ClinicPortalNav } from './portal-nav'
@@ -30,19 +30,29 @@ export default async function ClinicLayout({
 }: Readonly<{
   children: React.ReactNode
 }>) {
-  const clinicResult = await getClinicContextResult()
+  const userRole = await getUserRole()
 
-  if (!clinicResult) {
+  if (!userRole) {
     redirect('/clinic/login')
   }
 
-  if (clinicResult.kind === 'blocked') {
-    return <ClinicAccessBlocked message={clinicResult.message} />
+  if (userRole.role !== 'clinic_user') {
+    redirect('/dashboard')
   }
 
-  const clinicContext = clinicResult.clinic
-  const clinicLogoUrl = await getClinicLogoUrl(clinicContext.clinicLogoPath)
-  const clinicInitials = getClinicInitials(clinicContext.clinicName)
+  const supabase = await createServerSupabase()
+  const { data: clinic, error: clinicError } = await supabase
+    .from('clinics')
+    .select('id, name, logo_path, is_active')
+    .eq('id', userRole.clinicId)
+    .single()
+
+  if (clinicError || !clinic || !clinic.is_active) {
+    return <ClinicAccessBlocked message="Your clinic account is inactive." />
+  }
+
+  const clinicLogoUrl = await getClinicLogoUrl(clinic.logo_path)
+  const clinicInitials = getClinicInitials(clinic.name)
 
   return (
     <main className="min-h-screen bg-neutral-100 px-6 py-8 md:px-10">
@@ -54,7 +64,7 @@ export default async function ClinicLayout({
                 {clinicLogoUrl ? (
                   <img
                     src={clinicLogoUrl}
-                    alt={`${clinicContext.clinicName} logo`}
+                    alt={`${clinic.name} logo`}
                     className="h-full w-full object-contain"
                   />
                 ) : (
@@ -67,7 +77,7 @@ export default async function ClinicLayout({
                   Clinic Portal
                 </div>
                 <h1 className="mt-2 text-4xl font-bold tracking-tight text-slate-900 md:text-5xl">
-                  {clinicContext.clinicName} Aftercare Portal
+                  {clinic.name} Aftercare Portal
                 </h1>
                 <p className="mt-3 text-xl text-slate-500">
                   Powered by Horizon Pet Cremation

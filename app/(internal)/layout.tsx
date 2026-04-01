@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation'
 
-import { getInternalHorizonUserResult } from '@/lib/internal-auth'
+import { getUserRole } from '@/lib/auth/get-user-role'
 
 import { InternalPortalNav } from './portal-nav'
 
@@ -9,10 +9,14 @@ export default async function InternalLayout({
 }: Readonly<{
   children: React.ReactNode
 }>) {
-  const internalUserResult = await getInternalHorizonUserResult()
+  const userRole = await getUserRole()
 
-  if (!internalUserResult || internalUserResult.kind !== 'ok') {
+  if (!userRole) {
     redirect('/admin/login')
+  }
+
+  if (userRole.role !== 'admin' && userRole.role !== 'horizon_staff') {
+    redirect('/clinic')
   }
 
   return (

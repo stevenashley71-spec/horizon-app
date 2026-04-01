@@ -11,6 +11,8 @@ type ClinicFormProps = {
     id: string
     name: string
     code: string | null
+    pickup_verification_code: string | null
+    delivery_verification_code: string | null
     address_line_1: string | null
     address_line_2: string | null
     city: string | null
@@ -178,6 +180,36 @@ export function ClinicForm({ clinic }: ClinicFormProps) {
             id={`clinic-code-${clinic?.id ?? 'new'}`}
             name="code"
             defaultValue={clinic?.code ?? ''}
+            className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-slate-900"
+          />
+        </div>
+        <div>
+          <label
+            htmlFor={`clinic-pickup-verification-code-${clinic?.id ?? 'new'}`}
+            className="mb-2 block text-sm font-medium text-slate-600"
+          >
+            Pickup Verification Code
+          </label>
+          <input
+            id={`clinic-pickup-verification-code-${clinic?.id ?? 'new'}`}
+            name="pickup_verification_code"
+            type="text"
+            defaultValue={clinic?.pickup_verification_code ?? ''}
+            className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-slate-900"
+          />
+        </div>
+        <div>
+          <label
+            htmlFor={`clinic-delivery-verification-code-${clinic?.id ?? 'new'}`}
+            className="mb-2 block text-sm font-medium text-slate-600"
+          >
+            Delivery Verification Code
+          </label>
+          <input
+            id={`clinic-delivery-verification-code-${clinic?.id ?? 'new'}`}
+            type="text"
+            value={clinic?.delivery_verification_code ?? ''}
+            readOnly
             className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-slate-900"
           />
         </div>

@@ -19,6 +19,7 @@ export type CaseEventType =
 export const ALL_CASE_EVENT_TYPES: CaseEventType[] = Object.values(CASE_EVENT_TYPES)
 
 export const OPERATIONAL_CASE_EVENT_TYPES: CaseEventType[] = [
+  CASE_EVENT_TYPES.CASE_CREATED,
   CASE_EVENT_TYPES.PICKED_UP,
   CASE_EVENT_TYPES.RECEIVED_AT_FACILITY,
   CASE_EVENT_TYPES.CLAY_PAW_PRINT,
@@ -30,6 +31,10 @@ export const OPERATIONAL_CASE_EVENT_TYPES: CaseEventType[] = [
   CASE_EVENT_TYPES.PACKAGED,
   CASE_EVENT_TYPES.RETURNED,
 ]
+
+export function isOperationalCaseEventType(value: string): value is CaseEventType {
+  return OPERATIONAL_CASE_EVENT_TYPES.includes(value as CaseEventType)
+}
 
 export const CASE_EVENT_STATUS_MAPPING: Partial<Record<CaseEventType, string>> = {
   [CASE_EVENT_TYPES.PICKED_UP]: 'new',
@@ -47,92 +52,6 @@ export function isCaseEventType(value: string): value is CaseEventType {
 
 type CaseEventLike = {
   event_type?: string | null
-}
-
-function getNormalizedEventTypes(existingEvents: CaseEventLike[] | null | undefined) {
-  return (existingEvents ?? [])
-    .map((event) => event.event_type)
-    .filter(
-      (eventType): eventType is CaseEventType =>
-        typeof eventType === 'string' &&
-        isCaseEventType(eventType) &&
-        OPERATIONAL_CASE_EVENT_TYPES.includes(eventType)
-    )
-}
-
-export function canAppendEvent(
-  existingEvents: CaseEventLike[] | null | undefined,
-  nextEventType: string,
-  options: {
-    cremationType?: string | null
-  } = {}
-): nextEventType is CaseEventType {
-  if (!isCaseEventType(nextEventType)) {
-    return false
-  }
-
-  const eventTypes = getNormalizedEventTypes(existingEvents)
-  const hasAnyEvents = eventTypes.length > 0
-  const latestEventType = eventTypes[0] ?? null
-  const cremationType = options.cremationType?.trim().toLowerCase()
-  const isGeneralCase = cremationType === 'general' || cremationType === 'communal'
-  const terminalEventType = isGeneralCase
-    ? CASE_EVENT_TYPES.SCATTERED
-    : CASE_EVENT_TYPES.RETURNED
-  const hasTerminalEvent = eventTypes.includes(terminalEventType)
-
-  if (!hasAnyEvents) {
-    return (
-      nextEventType === CASE_EVENT_TYPES.PICKED_UP ||
-      nextEventType === CASE_EVENT_TYPES.RECEIVED_AT_FACILITY
-    )
-  }
-
-  if (hasTerminalEvent) {
-    return false
-  }
-
-  if (nextEventType === CASE_EVENT_TYPES.PICKED_UP) {
-    return false
-  }
-
-  switch (latestEventType) {
-    case CASE_EVENT_TYPES.PICKED_UP:
-      return nextEventType === CASE_EVENT_TYPES.RECEIVED_AT_FACILITY
-    case CASE_EVENT_TYPES.RECEIVED_AT_FACILITY:
-      return nextEventType === CASE_EVENT_TYPES.CLAY_PAW_PRINT
-    case CASE_EVENT_TYPES.CLAY_PAW_PRINT:
-      return nextEventType === CASE_EVENT_TYPES.NOSE_PRINT
-    case CASE_EVENT_TYPES.NOSE_PRINT:
-      return nextEventType === CASE_EVENT_TYPES.FUR_CLIPPING
-    case CASE_EVENT_TYPES.FUR_CLIPPING:
-      return nextEventType === CASE_EVENT_TYPES.CREMATION_STARTED
-    case CASE_EVENT_TYPES.CREMATION_STARTED:
-      return nextEventType === CASE_EVENT_TYPES.CREMATION_COMPLETED
-    case CASE_EVENT_TYPES.CREMATION_COMPLETED:
-      return isGeneralCase
-        ? nextEventType === CASE_EVENT_TYPES.SCATTERED
-        : nextEventType === CASE_EVENT_TYPES.PACKAGED
-    case CASE_EVENT_TYPES.SCATTERED:
-      return false
-    case CASE_EVENT_TYPES.PACKAGED:
-      return nextEventType === CASE_EVENT_TYPES.RETURNED
-    case CASE_EVENT_TYPES.RETURNED:
-      return false
-    default:
-      return false
-  }
-}
-
-export function getAllowedNextCaseEvents(
-  existingEvents: CaseEventLike[] | null | undefined,
-  options: {
-    cremationType?: string | null
-  } = {}
-): CaseEventType[] {
-  return OPERATIONAL_CASE_EVENT_TYPES.filter((eventType) =>
-    canAppendEvent(existingEvents, eventType, options)
-  )
 }
 
 export function formatCaseEventType(eventType: string | null | undefined) {

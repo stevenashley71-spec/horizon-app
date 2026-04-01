@@ -8,6 +8,11 @@ import { createServerSupabase, createServiceRoleSupabase } from '@/lib/supabase/
 const CLINIC_LOGO_BUCKET = 'clinic-logos'
 const MAX_LOGO_SIZE_BYTES = 5 * 1024 * 1024
 
+function generateClinicVerificationCode(prefix: string): string {
+  const random = Math.random().toString(36).slice(2, 10).toUpperCase()
+  return `${prefix}-${random}`
+}
+
 function slugifyFileName(fileName: string) {
   return fileName
     .toLowerCase()
@@ -77,6 +82,10 @@ export async function saveClinicAdmin(formData: FormData) {
   const clinicId = typeof clinicIdValue === 'string' && clinicIdValue ? clinicIdValue : null
   const name = String(formData.get('name') ?? '').trim()
   const code = String(formData.get('code') ?? '').trim() || null
+  const pickupVerificationCode =
+    String(formData.get('pickup_verification_code') ?? '').trim() || null
+  const deliveryVerificationCode =
+    String(formData.get('delivery_verification_code') ?? '').trim() || null
   const addressLine1 = String(formData.get('address_line_1') ?? '').trim() || null
   const addressLine2 = String(formData.get('address_line_2') ?? '').trim() || null
   const city = String(formData.get('city') ?? '').trim() || null
@@ -118,6 +127,8 @@ export async function saveClinicAdmin(formData: FormData) {
   const baseFields = {
     name,
     code,
+    pickup_verification_code: pickupVerificationCode,
+    delivery_verification_code: deliveryVerificationCode,
     address_line_1: addressLine1,
     address_line_2: addressLine2,
     city,
@@ -133,10 +144,17 @@ export async function saveClinicAdmin(formData: FormData) {
   let currentLogoPath = existingClinic?.logo_path ?? null
 
   if (!targetClinicId) {
+    const generatedPickupVerificationCode =
+      pickupVerificationCode ?? generateClinicVerificationCode('HPCP')
+    const generatedDeliveryVerificationCode =
+      deliveryVerificationCode ?? generateClinicVerificationCode('HPCD')
+
     const { data, error } = await supabase
       .from('clinics')
       .insert({
         ...baseFields,
+        pickup_verification_code: generatedPickupVerificationCode,
+        delivery_verification_code: generatedDeliveryVerificationCode,
         is_active: true,
       })
       .select('id, logo_path')

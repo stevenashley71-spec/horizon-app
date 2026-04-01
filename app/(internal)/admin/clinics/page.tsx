@@ -10,6 +10,8 @@ type ClinicRow = {
   id: string
   name: string
   code: string | null
+  pickup_verification_code: string | null
+  delivery_verification_code: string | null
   address_line_1: string | null
   address_line_2: string | null
   city: string | null
@@ -56,7 +58,7 @@ export default async function ClinicsAdminPage() {
   const { data: clinics, error } = await supabase
     .from('clinics')
     .select(
-      'id, name, code, address_line_1, address_line_2, city, state, zip, phone, email, logo_path, logo_alt_text, is_active'
+      'id, name, code, pickup_verification_code, delivery_verification_code, address_line_1, address_line_2, city, state, zip, phone, email, logo_path, logo_alt_text, is_active'
     )
     .order('name', { ascending: true })
 

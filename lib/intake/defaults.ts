@@ -45,7 +45,12 @@ export const EMPTY_SERVICE_SNAPSHOT: IntakeServiceSnapshot = {
   acknowledgmentFlags: {},
 }
 
-export const EMPTY_PRODUCT_SNAPSHOT: IntakeProductSnapshot = []
+export const EMPTY_PRODUCT_SNAPSHOT: IntakeProductSnapshot = {
+  memorial_items: [],
+  memorial_items_total_cents: 0,
+  premium_urns: [],
+  add_ons: [],
+}
 
 export const EMPTY_PRICING_SNAPSHOT: IntakePricingSnapshot = {
   currency: 'USD',

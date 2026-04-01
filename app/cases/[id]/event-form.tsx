@@ -6,14 +6,6 @@ import { useFormStatus } from 'react-dom'
 
 import { addCaseEvent } from '@/app/actions/add-case-event'
 import { formatCaseEventType } from '@/lib/case-events'
-import {
-  getCurrentWorkflowStep,
-  getNextAllowedEventType,
-  isCaseWorkflowComplete,
-  isOperationalWorkflowEventType,
-  type CaseWorkflowEventLike,
-  type OperationalWorkflowEventType,
-} from '@/lib/case-workflow'
 
 type EventFormState = {
   error: string | null
@@ -50,11 +42,17 @@ export function CaseEventForm({
   caseEvents,
   cremationType,
   allowedEventType = null,
+  currentStep = null,
+  nextStep = null,
+  isComplete = false,
 }: {
   caseId: string
-  caseEvents: CaseWorkflowEventLike[] | null | undefined
+  caseEvents: Array<{ event_type?: string | null; created_at?: string | null }> | null | undefined
   cremationType?: string | null
-  allowedEventType?: OperationalWorkflowEventType | null
+  allowedEventType?: string | null
+  currentStep?: string | null
+  nextStep?: string | null
+  isComplete?: boolean
 }) {
   const router = useRouter()
   const [state, formAction] = useActionState(
@@ -79,24 +77,7 @@ export function CaseEventForm({
     initialState
   )
 
-  const workflowOptions = { cremationType }
-  const currentWorkflowStep = getCurrentWorkflowStep(caseEvents, workflowOptions)
-  const nextRequiredEvent = getNextAllowedEventType(caseEvents, workflowOptions)
-  const workflowComplete = isCaseWorkflowComplete(caseEvents, workflowOptions)
-  const latestOperationalEventType =
-    [...(caseEvents ?? [])]
-      .filter(
-        (event): event is CaseWorkflowEventLike & { event_type: OperationalWorkflowEventType } =>
-          typeof event?.event_type === 'string' && isOperationalWorkflowEventType(event.event_type)
-      )
-      .sort((a, b) => {
-        const aTime = a.created_at ? new Date(a.created_at).getTime() : 0
-        const bTime = b.created_at ? new Date(b.created_at).getTime() : 0
-
-        return bTime - aTime
-      })[0]?.event_type ?? null
-
-  if (workflowComplete) {
+  if (isComplete) {
     return (
       <div className="space-y-2">
         <p className="text-sm text-slate-600">Workflow complete. No further events required.</p>
@@ -107,12 +88,12 @@ export function CaseEventForm({
   }
 
   if (allowedEventType) {
-    if (nextRequiredEvent !== allowedEventType) {
+    if (nextStep !== allowedEventType) {
       return (
         <div className="space-y-2">
           <p className="text-sm text-slate-600">
             The next available workflow event is{' '}
-            {nextRequiredEvent ? formatCaseEventType(nextRequiredEvent) : 'none'}.
+            {nextStep ? formatCaseEventType(nextStep) : 'none'}.
           </p>
           {state.error ? <p className="text-sm text-red-700">{state.error}</p> : null}
           {state.success ? <p className="text-sm text-emerald-700">{state.success}</p> : null}
@@ -139,12 +120,11 @@ export function CaseEventForm({
     )
   }
 
-  if (!nextRequiredEvent) {
+  if (!nextStep) {
     return (
       <div className="space-y-2">
         <p className="text-sm text-slate-600">
-          No operational event is currently available after{' '}
-          {latestOperationalEventType ? formatCaseEventType(latestOperationalEventType) : 'NONE'}.
+          No operational event is currently available.
         </p>
         {state.error ? <p className="text-sm text-red-700">{state.error}</p> : null}
         {state.success ? <p className="text-sm text-emerald-700">{state.success}</p> : null}
@@ -158,19 +138,19 @@ export function CaseEventForm({
         <div className="rounded-xl border border-slate-200 px-4 py-3">
           <div className="text-sm font-medium text-slate-500">Current workflow step</div>
           <div className="mt-1 text-sm font-semibold text-slate-900">
-            {currentWorkflowStep ? formatCaseEventType(currentWorkflowStep) : 'None'}
+            {currentStep ? formatCaseEventType(currentStep) : 'None'}
           </div>
         </div>
         <div className="rounded-xl border border-slate-200 px-4 py-3">
           <div className="text-sm font-medium text-slate-500">Next required event</div>
           <div className="mt-1 text-sm font-semibold text-slate-900">
-            {nextRequiredEvent ? formatCaseEventType(nextRequiredEvent) : 'Complete'}
+            {nextStep ? formatCaseEventType(nextStep) : 'Complete'}
           </div>
         </div>
         <div className="rounded-xl border border-slate-200 px-4 py-3">
           <div className="text-sm font-medium text-slate-500">Workflow complete</div>
           <div className="mt-1 text-sm font-semibold text-slate-900">
-            {workflowComplete ? 'Yes' : 'No'}
+            {isComplete ? 'Yes' : 'No'}
           </div>
         </div>
       </div>
@@ -178,7 +158,7 @@ export function CaseEventForm({
       <div className="space-y-3">
         <div className="text-lg font-medium text-slate-900">Next Required Event</div>
         <div className="flex flex-wrap gap-3">
-          <SubmitButton eventType={nextRequiredEvent} />
+          <SubmitButton eventType={nextStep} />
         </div>
       </div>
 

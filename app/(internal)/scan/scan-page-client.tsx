@@ -5,18 +5,18 @@ import { useState } from 'react'
 import { addCaseEvent } from '@/app/actions/add-case-event'
 import { loadCaseWithEvents } from '@/app/actions/load-case-with-events'
 import { formatCaseEventType } from '@/lib/case-events'
-import {
-  getCurrentWorkflowStep,
-  getNextAllowedEventType,
-  getOrderedOperationalEventTypes,
-  isCaseWorkflowComplete,
-} from '@/lib/case-workflow'
 import { supabase } from '@/lib/supabase/client'
 
 type LoadedCase = {
   id: string
   case_number: string
   cremation_type: string | null
+  clinic_id: string | null
+  pickup_verification_code: string | null
+  currentStep: string | null
+  nextStep: string | null
+  nextStepCompletionCode: string | null
+  isComplete: boolean
 }
 
 type LoadedCaseEvent = {
@@ -27,12 +27,44 @@ type LoadedCaseEvent = {
   metadata?: Record<string, unknown> | null
 }
 
-function getCompletionCodeForEvent(eventType: string): string {
-  return `${eventType}_completed`
-}
-
 function isStorageReturnCode(scan: string): boolean {
   return scan.endsWith('_storage')
+}
+
+function parseCaseQrScan(scan: string): string | null {
+  if (!scan.startsWith('HPC_CASE:')) {
+    return null
+  }
+
+  const caseNumber = scan.slice('HPC_CASE:'.length).trim()
+  return caseNumber || null
+}
+
+function parseClinicPickupQrScan(scan: string): {
+  clinicId: string
+  pickupVerificationCode: string
+} | null {
+  if (!scan.startsWith('HPC_CLINIC_PICKUP:')) {
+    return null
+  }
+
+  const parts = scan.split(':')
+
+  if (parts.length !== 3) {
+    return null
+  }
+
+  const clinicId = parts[1]?.trim() ?? ''
+  const pickupVerificationCode = parts[2]?.trim() ?? ''
+
+  if (!clinicId || !pickupVerificationCode) {
+    return null
+  }
+
+  return {
+    clinicId,
+    pickupVerificationCode,
+  }
 }
 
 export default function ScanPageClient() {
@@ -46,18 +78,15 @@ export default function ScanPageClient() {
   >('waiting_for_case')
   const [pendingSwitchCaseNumber, setPendingSwitchCaseNumber] = useState<string | null>(null)
 
-  const workflowOptions = { cremationType: loadedCase?.cremation_type ?? null }
-  const currentWorkflowStep = getCurrentWorkflowStep(caseEvents, workflowOptions)
-  const nextRequiredEvent = getNextAllowedEventType(caseEvents, workflowOptions)
-  const workflowComplete = isCaseWorkflowComplete(caseEvents, workflowOptions)
-  const orderedWorkflowSteps = getOrderedOperationalEventTypes(workflowOptions)
-  const nextRequiredIndex = nextRequiredEvent
-    ? orderedWorkflowSteps.indexOf(nextRequiredEvent)
-    : -1
-  const upcomingStep =
-    nextRequiredIndex >= 0 && nextRequiredIndex + 1 < orderedWorkflowSteps.length
-      ? orderedWorkflowSteps[nextRequiredIndex + 1]
-      : null
+  const currentStep = loadedCase?.currentStep ?? null
+  const nextStep = loadedCase?.nextStep ?? null
+  const nextStepCompletionCode = loadedCase?.nextStepCompletionCode ?? null
+  const isComplete = loadedCase?.isComplete ?? false
+  const upcomingStep = null
+  const pickupVerificationInstructions =
+    nextStep === 'picked_up'
+      ? 'Scan case QR to begin. After that, scan the clinic pickup verification QR.'
+      : 'Scan a pet QR to load a case. After that, complete the next step and scan its completion code.'
 
   function handleResetScan() {
     setLoadedCase(null)
@@ -90,7 +119,18 @@ export default function ScanPageClient() {
 
     try {
       if (!loadedCase) {
-        const result = await loadCaseWithEvents(scannedValue)
+        const parsedClinicPickupScan = parseClinicPickupQrScan(scannedValue)
+
+        if (scannedValue.startsWith('HPC_CLINIC_PICKUP:') && !parsedClinicPickupScan) {
+          throw new Error('Invalid clinic pickup verification code.')
+        }
+
+        if (parsedClinicPickupScan) {
+          throw new Error('Scan case QR first.')
+        }
+
+        const scannedCaseNumber = parseCaseQrScan(scannedValue) ?? scannedValue
+        const result = await loadCaseWithEvents(scannedCaseNumber)
         setLoadedCase(result.caseItem)
         setCaseEvents(result.caseEvents)
         setScanMode('case_loaded')
@@ -123,7 +163,20 @@ export default function ScanPageClient() {
         return
       }
 
-      const scannedCaseResult = await tryLoadScannedCase(scannedValue)
+      const parsedClinicPickupScan = parseClinicPickupQrScan(scannedValue)
+
+      if (scannedValue.startsWith('HPC_CLINIC_PICKUP:') && !parsedClinicPickupScan) {
+        throw new Error('Invalid clinic pickup verification code.')
+      }
+
+      if (parsedClinicPickupScan && nextStep !== 'picked_up') {
+        throw new Error(
+          'Pickup verification is only valid when the next required step is Picked Up.'
+        )
+      }
+
+      const parsedCaseNumber = parseCaseQrScan(scannedValue)
+      const scannedCaseResult = await tryLoadScannedCase(parsedCaseNumber ?? scannedValue)
       const scannedCase = scannedCaseResult?.caseItem ?? null
 
       if (scannedCase && scannedCase.case_number !== loadedCase.case_number) {
@@ -135,11 +188,49 @@ export default function ScanPageClient() {
 
       setScanMode('processing_action')
 
-      if (!nextRequiredEvent) {
+      if (!nextStep) {
         throw new Error('Workflow complete. No further action scans are accepted.')
       }
 
-      const expectedCompletionCode = getCompletionCodeForEvent(nextRequiredEvent)
+      if (nextStep === 'picked_up') {
+        if (!parsedClinicPickupScan) {
+          throw new Error('Invalid clinic pickup verification code.')
+        }
+
+        if (!loadedCase.clinic_id || !loadedCase.pickup_verification_code) {
+          throw new Error('No pickup verification code is configured for this clinic.')
+        }
+
+        if (parsedClinicPickupScan.clinicId !== loadedCase.clinic_id) {
+          throw new Error('Clinic verification code does not match this case’s clinic.')
+        }
+
+        if (
+          parsedClinicPickupScan.pickupVerificationCode !==
+          loadedCase.pickup_verification_code
+        ) {
+          throw new Error('Invalid pickup verification code for this clinic.')
+        }
+
+        await addCaseEvent(loadedCase.id, nextStep, {
+          scannedCode: scannedValue,
+          scanMode,
+        })
+
+        const refreshed = await loadCaseWithEvents(loadedCase.case_number)
+        setLoadedCase(refreshed.caseItem)
+        setCaseEvents(refreshed.caseEvents)
+        setScanMode('case_loaded')
+        setPendingSwitchCaseNumber(null)
+        setScanValue('')
+        return
+      }
+
+      const expectedCompletionCode = nextStepCompletionCode
+
+      if (!expectedCompletionCode) {
+        throw new Error('No completion scan code is configured for this workflow step.')
+      }
 
       if (scannedValue !== expectedCompletionCode) {
         throw new Error(
@@ -147,7 +238,10 @@ export default function ScanPageClient() {
         )
       }
 
-      await addCaseEvent(loadedCase.id, nextRequiredEvent)
+        await addCaseEvent(loadedCase.id, nextStep, {
+          scannedCode: scannedValue,
+          scanMode,
+        })
 
       const refreshed = await loadCaseWithEvents(loadedCase.case_number)
       setLoadedCase(refreshed.caseItem)
@@ -174,8 +268,7 @@ export default function ScanPageClient() {
             Scan Station
           </h1>
           <p className="mt-3 text-lg text-slate-500">
-            Scan a pet QR to load a case. After that, complete the next step and scan its
-            completion code.
+            {pickupVerificationInstructions}
           </p>
 
           <div className="mt-6 whitespace-pre-line rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700">
@@ -186,15 +279,17 @@ export default function ScanPageClient() {
                 : scanMode === 'processing_action'
                   ? 'Processing completion...'
                   : `${`Current step: ${
-                      currentWorkflowStep ? formatCaseEventType(currentWorkflowStep) : 'None'
+                      currentStep ? formatCaseEventType(currentStep) : 'None'
                     }\nNext step: ${
-                      nextRequiredEvent ? formatCaseEventType(nextRequiredEvent) : 'Complete'
+                      nextStep ? formatCaseEventType(nextStep) : 'Complete'
                     }${
                       upcomingStep ? `\nUpcoming: ${formatCaseEventType(upcomingStep)}` : ''
                     }\n\nComplete ${
-                      nextRequiredEvent ? formatCaseEventType(nextRequiredEvent) : 'Complete'
+                      nextStep ? formatCaseEventType(nextStep) : 'Complete'
                     }, then scan: ${
-                      nextRequiredEvent ? getCompletionCodeForEvent(nextRequiredEvent) : 'Complete'
+                      nextStep === 'picked_up'
+                        ? 'Clinic pickup verification QR'
+                        : nextStepCompletionCode ?? 'Complete'
                     }`}`}
           </div>
 
@@ -234,19 +329,19 @@ export default function ScanPageClient() {
             <div>
               <div className="text-sm font-medium text-slate-500">Current workflow step</div>
               <div className="text-lg font-semibold text-slate-900">
-                {currentWorkflowStep ? formatCaseEventType(currentWorkflowStep) : 'None'}
+                {currentStep ? formatCaseEventType(currentStep) : 'None'}
               </div>
             </div>
             <div>
               <div className="text-sm font-medium text-slate-500">Next required event</div>
               <div className="text-lg font-semibold text-slate-900">
-                {nextRequiredEvent ? formatCaseEventType(nextRequiredEvent) : 'Complete'}
+                {nextStep ? formatCaseEventType(nextStep) : 'Complete'}
               </div>
             </div>
             <div>
               <div className="text-sm font-medium text-slate-500">Workflow complete</div>
               <div className="text-lg font-semibold text-slate-900">
-                {workflowComplete ? 'Yes' : 'No'}
+                {isComplete ? 'Yes' : 'No'}
               </div>
             </div>
           </div>

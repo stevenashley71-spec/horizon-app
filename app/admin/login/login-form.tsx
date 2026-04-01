@@ -28,7 +28,7 @@ export function AdminLoginForm() {
       return
     }
 
-    router.replace('/')
+    router.replace('/dashboard')
     router.refresh()
   }
 

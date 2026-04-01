@@ -49,7 +49,16 @@ export type IntakeSelectedProduct = {
   metadata?: Record<string, unknown>
 }
 
-export type IntakeProductSnapshot = IntakeSelectedProduct[]
+export type IntakeProductSnapshot = {
+  memorial_items: {
+    product_id: string
+    name: string
+    price_cents: number
+  }[]
+  memorial_items_total_cents: number
+  premium_urns?: unknown[]
+  add_ons?: unknown[]
+}
 
 export type IntakePricingSnapshot = {
   currency: 'USD'

@@ -68,7 +68,34 @@ export async function loadIntakeDraft(draftId?: string): Promise<LoadedIntakeDra
     throw new Error('Authentication required')
   }
 
-  const catalog = await loadClinicIntakeCatalog()
+  let catalog: ClinicIntakeCatalog
+
+  try {
+    catalog = await loadClinicIntakeCatalog()
+  } catch (error) {
+    if (
+      process.env.NODE_ENV !== 'production' &&
+      error instanceof Error &&
+      (error.message === 'Failed to load clinic' || error.message === 'Clinic not found')
+    ) {
+      catalog = {
+        clinic: {
+          id: 'dev-clinic-1',
+          name: 'Development Clinic',
+          code: null,
+          logoUrl: null,
+          logoAlt: null,
+        },
+        services: [],
+        memorialItems: [],
+        premiumUrns: [],
+        soulBursts: [],
+        addOns: [],
+      }
+    } else {
+      throw error
+    }
+  }
 
   if (!draftId) {
     return {

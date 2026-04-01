@@ -11,11 +11,6 @@ type DashboardPageProps = {
   }>
 }
 
-type CaseEventRow = {
-  case_id: string
-  event_type: string
-}
-
 function getStatusClasses(status: string | null) {
   if (status === 'new') return 'bg-blue-100 text-blue-800'
   if (status === 'received') return 'bg-cyan-100 text-cyan-800'
@@ -68,32 +63,9 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
     )
   }
 
-  const caseIds = cases?.map((caseItem) => caseItem.id) ?? []
-  let latestEventsByCaseId = new Map<string, CaseEventRow[]>()
-
-  if (caseIds.length > 0) {
-    const { data: caseEvents } = await supabase
-      .from('case_events')
-      .select('case_id, event_type, created_at')
-      .in('case_id', caseIds)
-      .order('created_at', { ascending: false })
-
-    latestEventsByCaseId = new Map(
-      caseIds.map((caseId) => [
-        caseId,
-        ((caseEvents as Array<CaseEventRow & { created_at: string }> | null) ?? []).filter(
-          (event) => event.case_id === caseId
-        ),
-      ])
-    )
-  }
-
   const rows =
     cases?.map((caseItem) => {
-      const displayedStatus = resolveCaseDisplayStatus(
-        caseItem.status,
-        latestEventsByCaseId.get(caseItem.id)
-      )
+      const displayedStatus = resolveCaseDisplayStatus(caseItem.status, null)
 
       return {
         id: caseItem.id,

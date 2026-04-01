@@ -1,7 +1,7 @@
 import Link from 'next/link'
 
+import { getUserRole } from '@/lib/auth/get-user-role'
 import { formatCaseStatus } from '@/lib/case-status'
-import { getClinicContextResult } from '@/lib/clinic-auth'
 import { resolveCaseDisplayStatus } from '@/lib/resolve-case-display-status'
 import { createServiceRoleSupabase } from '@/lib/supabase/server'
 
@@ -12,12 +12,6 @@ type CaseRow = {
   owner_name: string | null
   status: string | null
   created_at: string | null
-}
-
-type CaseEventRow = {
-  case_id: string
-  event_type: string
-  created_at: string
 }
 
 function getStatusClasses(status: string | null) {
@@ -32,19 +26,18 @@ function getStatusClasses(status: string | null) {
 }
 
 export default async function ClinicPage() {
-  const clinicResult = await getClinicContextResult()
+  const userRole = await getUserRole()
 
-  if (!clinicResult || clinicResult.kind !== 'ok') {
+  if (!userRole || userRole.role !== 'clinic_user') {
     throw new Error('Clinic context is required')
   }
 
-  const clinicContext = clinicResult.clinic
   const supabase = createServiceRoleSupabase()
 
   const { data: cases, error: casesError } = await supabase
     .from('cases')
     .select('id, case_number, pet_name, owner_name, status, created_at')
-    .eq('clinic_id', clinicContext.clinicId)
+    .eq('clinic_id', userRole.clinicId)
     .not('status', 'in', '("completed","cancelled")')
     .order('created_at', { ascending: false })
 
@@ -52,33 +45,8 @@ export default async function ClinicPage() {
     throw new Error('Unable to load clinic dashboard')
   }
 
-  const caseIds = (cases as CaseRow[] | null)?.map((caseItem) => caseItem.id) ?? []
-  let latestEventsByCaseId = new Map<string, CaseEventRow[]>()
-
-  if (caseIds.length > 0) {
-    const { data: caseEvents, error: caseEventsError } = await supabase
-      .from('case_events')
-      .select('case_id, event_type, created_at')
-      .in('case_id', caseIds)
-      .order('created_at', { ascending: false })
-
-    if (caseEventsError) {
-      throw new Error('Unable to load clinic case events')
-    }
-
-    latestEventsByCaseId = new Map(
-      caseIds.map((caseId) => [
-        caseId,
-        ((caseEvents as CaseEventRow[] | null) ?? []).filter((event) => event.case_id === caseId),
-      ])
-    )
-  }
-
   const openCases = ((cases as CaseRow[] | null) ?? []).map((caseItem) => {
-    const displayedStatus = resolveCaseDisplayStatus(
-      caseItem.status,
-      latestEventsByCaseId.get(caseItem.id)
-    )
+    const displayedStatus = resolveCaseDisplayStatus(caseItem.status, null)
 
     return {
       ...caseItem,
@@ -106,7 +74,7 @@ export default async function ClinicPage() {
           Open work at a glance
         </h2>
         <p className="mt-3 max-w-3xl text-lg text-slate-500">
-          Review active cases for {clinicContext.clinicName}, start a new work order, and keep
+          Review active cases for {userRole.clinicName}, start a new work order, and keep
           your team aligned on current aftercare status.
         </p>
 
@@ -149,7 +117,7 @@ export default async function ClinicPage() {
             </h3>
           </div>
           <p className="text-base text-slate-500">
-            Non-terminal cases for {clinicContext.clinicName}
+            Non-terminal cases for {userRole.clinicName}
           </p>
         </div>
 

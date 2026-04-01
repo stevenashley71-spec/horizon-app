@@ -2,13 +2,12 @@
 
 import { revalidatePath } from 'next/cache'
 
-import { ALL_CASE_EVENT_TYPES, isCaseEventType } from '@/lib/case-events'
 import {
-  getCurrentWorkflowStep,
-  getNextAllowedEventType,
-  isOperationalWorkflowEventType,
-  isCaseWorkflowComplete,
-} from '@/lib/case-workflow'
+  ALL_CASE_EVENT_TYPES,
+  isCaseEventType,
+  isOperationalCaseEventType,
+} from '@/lib/case-events'
+import { resolveWorkflow } from '@/lib/workflow/resolve-workflow'
 import { getClinicContextResult } from '@/lib/clinic-auth'
 import { getInternalHorizonUserResult } from '@/lib/internal-auth'
 import {
@@ -18,7 +17,11 @@ import {
 
 export async function addCaseEvent(
   caseId: string,
-  eventType: string
+  eventType: string,
+  scanContext?: {
+    scannedCode?: string | null
+    scanMode?: string | null
+  }
 ) {
   if (!caseId?.trim()) {
     throw new Error('Case ID is required')
@@ -79,11 +82,26 @@ export async function addCaseEvent(
     throw new Error('Unable to load case events')
   }
 
+  const workflow = await resolveWorkflow({
+    caseId: caseItem.id,
+    cremationType: caseItem.cremation_type === 'general' ? 'general' : 'private',
+    events: (existingEvents ?? []).flatMap((event) =>
+      typeof event.event_type === 'string' && typeof event.created_at === 'string'
+        ? [
+            {
+              event_type: event.event_type,
+              created_at: event.created_at,
+            },
+          ]
+        : []
+    ),
+  })
+
   const workflowOptions = { cremationType: caseItem.cremation_type }
   const isOperationallyBlocked =
     caseItem.status === 'on_hold' || caseItem.status === 'cancelled'
 
-  if (isOperationalWorkflowEventType(eventType)) {
+  if (isOperationalCaseEventType(eventType)) {
     if (isOperationallyBlocked) {
       throw new Error(
         caseItem.status === 'on_hold'
@@ -92,18 +110,23 @@ export async function addCaseEvent(
       )
     }
 
-    if (isCaseWorkflowComplete(existingEvents, workflowOptions)) {
-      throw new Error('Workflow is already complete. No further operational events are allowed.')
+    if (workflow.isComplete) {
+      throw new Error('Workflow is complete')
     }
 
-    const nextAllowedEventType = getNextAllowedEventType(existingEvents, workflowOptions)
+    if (workflow.allowedNextSteps.length === 0) {
+      throw new Error('Workflow is complete')
+    }
 
-    if (eventType !== nextAllowedEventType) {
-      const currentWorkflowStep = getCurrentWorkflowStep(existingEvents, workflowOptions)
+    if (!workflow.allowedNextSteps.includes(eventType)) {
+      throw new Error('Invalid workflow step')
+    }
 
-      throw new Error(
-        `Invalid event order. Expected ${nextAllowedEventType ?? 'no further events'}, received ${eventType}. Current workflow step: ${currentWorkflowStep ?? 'none'}.`
-      )
+    const matchingAllowedStepDetail =
+      workflow.allowedNextStepDetails.find((step) => step.code === eventType) ?? null
+
+    if (matchingAllowedStepDetail?.requiresScan && !scanContext?.scannedCode?.trim()) {
+      throw new Error('Scan is required for this workflow step')
     }
   }
 
@@ -112,7 +135,13 @@ export async function addCaseEvent(
     case_number: caseItem.case_number,
     event_type: eventType,
     created_by: user.id,
-    metadata: {},
+    metadata:
+      scanContext?.scannedCode || scanContext?.scanMode
+        ? {
+            scannedCode: scanContext.scannedCode ?? null,
+            scanMode: scanContext.scanMode ?? null,
+          }
+        : {},
   })
 
   if (insertError) {

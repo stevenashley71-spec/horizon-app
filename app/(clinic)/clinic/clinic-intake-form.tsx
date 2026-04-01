@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 
+import type { loadIntakeDraft } from '@/app/actions/intake/load-intake-draft'
 import { saveCase } from '@/app/actions/save-case'
 
 type ClinicOption = {
@@ -10,43 +11,117 @@ type ClinicOption = {
   name: string
 }
 
+type ClinicIntakeData = Awaited<ReturnType<typeof loadIntakeDraft>>
+
 export function ClinicIntakeForm({
-  clinicContext,
-  fallbackClinics,
-  allowDevClinicSelection,
+  intake,
+  clinicContext = null,
+  fallbackClinics = [],
+  allowDevClinicSelection = false,
   renderWithinPage = false,
 }: {
-  clinicContext: ClinicOption | null
-  fallbackClinics: ClinicOption[]
-  allowDevClinicSelection: boolean
+  intake: ClinicIntakeData
+  clinicContext?: ClinicOption | null
+  fallbackClinics?: ClinicOption[]
+  allowDevClinicSelection?: boolean
   renderWithinPage?: boolean
 }) {
   const router = useRouter()
 
-  const [clinicId, setClinicId] = useState(clinicContext?.id ?? '')
-  const [petName, setPetName] = useState('')
-  const [species, setSpecies] = useState('')
-  const [weight, setWeight] = useState('')
-  const [weightUnit, setWeightUnit] = useState<'lbs' | 'kg'>('lbs')
-  const [breed, setBreed] = useState('')
-  const [color, setColor] = useState('')
+  console.log('INTAKE_PAYLOAD', intake)
 
-  const [ownerFirstName, setOwnerFirstName] = useState('')
-  const [ownerLastName, setOwnerLastName] = useState('')
-  const [phone, setPhone] = useState('')
-  const [email, setEmail] = useState('')
-  const [street, setStreet] = useState('')
-  const [city, setCity] = useState('')
-  const [state, setState] = useState('OR')
-  const [zip, setZip] = useState('')
+  const catalog = intake?.catalog
+
+  console.log('INTAKE_CATALOG', catalog)
+  console.log('CATALOG_MEMORIAL_ITEMS', catalog?.memorialItems)
+  console.log('CATALOG_PREMIUM_URNS', catalog?.premiumUrns)
+  console.log('CATALOG_SOUL_BURSTS', catalog?.soulBursts)
+  console.log('CATALOG_ADDONS', catalog?.addOns)
+  console.log('INTAKE_PET', intake?.pet)
+  console.log('INTAKE_OWNER', intake?.owner)
+
+  const resolvedClinic =
+    clinicContext ??
+    (intake?.catalog?.clinic
+      ? {
+          id: intake.catalog.clinic.id,
+          name: intake.catalog.clinic.name,
+        }
+      : null)
+
+  const [clinicId, setClinicId] = useState(resolvedClinic?.id ?? '')
+  const [petName, setPetName] = useState(() => intake?.pet?.petName ?? '')
+  const [species, setSpecies] = useState(() => intake?.pet?.species ?? '')
+  const [weight, setWeight] = useState(() => {
+    if (intake?.pet?.weightLbs !== null && intake?.pet?.weightLbs !== undefined) {
+      return String(intake.pet.weightLbs)
+    }
+
+    if (intake?.pet?.weightKg !== null && intake?.pet?.weightKg !== undefined) {
+      return String(intake.pet.weightKg)
+    }
+
+    return ''
+  })
+  const [weightUnit, setWeightUnit] = useState<'lbs' | 'kg'>(() => {
+    if (intake?.pet?.weightLbs !== null && intake?.pet?.weightLbs !== undefined) {
+      return 'lbs'
+    }
+
+    if (intake?.pet?.weightKg !== null && intake?.pet?.weightKg !== undefined) {
+      return 'kg'
+    }
+
+    return 'lbs'
+  })
+  const [breed, setBreed] = useState(() => intake?.pet?.breed ?? '')
+  const [color, setColor] = useState(() => intake?.pet?.color ?? '')
+
+  const [ownerFirstName, setOwnerFirstName] = useState(() => {
+    const ownerName = intake?.owner?.ownerName?.trim() ?? ''
+
+    if (!ownerName) {
+      return ''
+    }
+
+    const [firstName = ''] = ownerName.split(/\s+/, 1)
+    return firstName
+  })
+  const [ownerLastName, setOwnerLastName] = useState(() => {
+    const ownerName = intake?.owner?.ownerName?.trim() ?? ''
+
+    if (!ownerName) {
+      return ''
+    }
+
+    const [, ...rest] = ownerName.split(/\s+/)
+    return rest.join(' ')
+  })
+  const [phone, setPhone] = useState(() => intake?.owner?.phone ?? '')
+  const [email, setEmail] = useState(() => intake?.owner?.email ?? '')
+  const [street, setStreet] = useState(() => intake?.owner?.addressLine1 ?? '')
+  const [city, setCity] = useState(() => intake?.owner?.city ?? '')
+  const [state, setState] = useState(() => intake?.owner?.state ?? 'OR')
+  const [zip, setZip] = useState(() => intake?.owner?.postalCode ?? '')
+  const [cremationType, setCremationType] = useState<'private' | 'general' | ''>(() => {
+    return intake?.service?.cremationType ?? ''
+  })
+  const [selectedMemorialItems, setSelectedMemorialItems] = useState<string[]>([])
 
   const [error, setError] = useState('')
+  const memorialItems = intake.catalog?.memorialItems ?? []
 
-  const hasClinicContext = Boolean(clinicContext)
+  const selectedMemorialTotalCents = memorialItems
+    .filter((item) => selectedMemorialItems.includes(item.productId))
+    .reduce((sum, item) => sum + (item.priceCents ?? 0), 0)
+
+  const formattedMemorialTotal = `$${(selectedMemorialTotalCents / 100).toFixed(2)}`
+
+  const hasClinicContext = Boolean(resolvedClinic)
   const hasAnyClinics = hasClinicContext || fallbackClinics.length > 0
   const showDevClinicSelector = !hasClinicContext && allowDevClinicSelection && fallbackClinics.length > 1
   const selectedClinic =
-    clinicContext ?? fallbackClinics.find((clinic) => clinic.id === clinicId) ?? null
+    resolvedClinic ?? fallbackClinics.find((clinic) => clinic.id === clinicId) ?? null
   const continueDisabled = !selectedClinic && !showDevClinicSelector
 
   function formatPhone(value: string) {
@@ -56,6 +131,14 @@ export function ClinicIntakeForm({
     if (digits.length <= 6) return `(${digits.slice(0, 3)}) ${digits.slice(3)}`
 
     return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`
+  }
+
+  function toggleMemorialItem(productId: string) {
+    setSelectedMemorialItems((prev) =>
+      prev.includes(productId)
+        ? prev.filter((id) => id !== productId)
+        : [...prev, productId]
+    )
   }
 
   async function handleContinue() {
@@ -112,6 +195,14 @@ export function ClinicIntakeForm({
       cremationType: '',
     }
 
+    const selectedMemorialProducts = memorialItems
+      .filter((item) => selectedMemorialItems.includes(item.productId))
+      .map((item) => ({
+        product_id: item.productId,
+        name: item.name,
+        price_cents: item.priceCents ?? 0,
+      }))
+
     try {
       const payload = {
         clinic_name: selectedClinic.name,
@@ -130,6 +221,8 @@ export function ClinicIntakeForm({
         owner_state: state || undefined,
         owner_zip: zip || undefined,
         cremation_type: '',
+        selected_memorial_items: selectedMemorialProducts,
+        memorial_items_total_cents: selectedMemorialTotalCents,
         case_data: caseData,
       }
 
@@ -159,9 +252,9 @@ export function ClinicIntakeForm({
           <div className="mt-6 grid gap-6 md:grid-cols-12">
             <div className="md:col-span-6">
               <label className="mb-3 block text-xl font-semibold">Clinic</label>
-              {clinicContext ? (
+              {resolvedClinic ? (
                 <div className="w-full rounded-[22px] border border-slate-200 bg-slate-50 px-6 py-5 text-2xl font-medium text-slate-900">
-                  {clinicContext.name}
+                  {resolvedClinic.name}
                 </div>
               ) : showDevClinicSelector ? (
                 <div className="space-y-3">
@@ -341,6 +434,88 @@ export function ClinicIntakeForm({
                 onChange={(e) => setZip(e.target.value)}
               />
             </div>
+          </div>
+        </section>
+
+        <section className="mt-16">
+          <h2 className="text-2xl font-semibold text-slate-900">
+            Cremation Type
+          </h2>
+
+          <div className="mt-6 grid gap-6 md:grid-cols-2">
+            <button
+              type="button"
+              onClick={() => setCremationType('private')}
+              className={`rounded-[22px] border px-6 py-5 text-left ${
+                cremationType === 'private'
+                  ? 'border-emerald-600 bg-emerald-50'
+                  : 'border-slate-200 bg-white'
+              }`}
+            >
+              <h3 className="text-xl font-semibold text-slate-900">Private Cremation</h3>
+              <p className="mt-2 text-base text-slate-500">
+                Your pet is cremated individually and ashes are returned.
+              </p>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setCremationType('general')}
+              className={`rounded-[22px] border px-6 py-5 text-left ${
+                cremationType === 'general'
+                  ? 'border-emerald-600 bg-emerald-50'
+                  : 'border-slate-200 bg-white'
+              }`}
+            >
+              <h3 className="text-xl font-semibold text-slate-900">General Cremation</h3>
+              <p className="mt-2 text-base text-slate-500">
+                Your pet is cremated with others and ashes are not returned.
+              </p>
+            </button>
+          </div>
+        </section>
+
+        <section className="mt-16">
+          <h2 className="text-2xl font-semibold text-slate-900">
+            Memorial Items
+          </h2>
+
+          {!intake.catalog?.memorialItems?.length ? (
+            <p className="mt-6 text-xl text-slate-500">
+              No memorial items available
+            </p>
+          ) : (
+            <div className="mt-6 grid gap-6 md:grid-cols-2">
+              {intake.catalog.memorialItems.map((item) => (
+                <div
+                  key={item.productId}
+                  onClick={() => toggleMemorialItem(item.productId)}
+                  className={`cursor-pointer rounded-[22px] border px-6 py-5 ${
+                    selectedMemorialItems.includes(item.productId)
+                      ? 'border-emerald-600 bg-emerald-50'
+                      : 'border-slate-200 bg-white'
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-4">
+                    <h3 className="text-xl font-semibold text-slate-900">{item.name}</h3>
+                    <p className="text-lg font-medium text-slate-700">
+                      ${(item.priceCents / 100).toFixed(2)}
+                    </p>
+                  </div>
+
+                  {item.description ? (
+                    <p className="mt-3 text-base text-slate-500">{item.description}</p>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+
+        <section className="mt-10">
+          <div className="flex items-center justify-between rounded-[22px] bg-slate-900 px-6 py-5 text-white">
+            <span className="text-xl font-semibold">Memorial Items Total</span>
+            <span className="text-2xl font-bold">{formattedMemorialTotal}</span>
           </div>
         </section>
 

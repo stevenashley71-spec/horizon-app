@@ -6,14 +6,16 @@ import { ClinicPortalFrame } from '@/app/components/clinic-portal-frame'
 import { InternalPortalFrame } from '@/app/components/internal-portal-frame'
 import { formatCaseEventType } from '@/lib/case-events'
 import { getUserRole } from '@/lib/auth/get-user-role'
-import { getNextAllowedEventType } from '@/lib/case-workflow'
 import { getAllowedNextStatuses, formatCaseStatus } from '@/lib/case-status'
 import { getClinicContextResult } from '@/lib/clinic-auth'
 import { resolveCaseDisplayStatus } from '@/lib/resolve-case-display-status'
 import { createServiceRoleSupabase } from '@/lib/supabase/server'
+import { resolveWorkflow } from '@/lib/workflow/resolve-workflow'
 
 import { CaseEventForm } from './event-form'
 import { StatusUpdateForm } from './status-update-form'
+
+const MANUAL_ONLY_STATUSES = new Set(['on_hold', 'cancelled'])
 
 type CaseItem = {
   id: string
@@ -188,10 +190,19 @@ export default async function CaseDetailPage({
 
   const typedCaseEvents = (caseEvents as CaseEventItem[] | null) ?? []
   const displayedStatus = resolveCaseDisplayStatus(typedCaseItem.status, typedCaseEvents)
-  const nextStatuses = getAllowedNextStatuses(typedCaseItem.status)
-  const nextAllowedEventType = getNextAllowedEventType(typedCaseEvents, {
-    cremationType: typedCaseItem.cremation_type,
+  const manualNextStatuses = getAllowedNextStatuses(typedCaseItem.status).filter((status) =>
+    MANUAL_ONLY_STATUSES.has(status)
+  )
+  const workflow = await resolveWorkflow({
+    caseId: typedCaseItem.id,
+    cremationType: typedCaseItem.cremation_type === 'general' ? 'general' : 'private',
+    events: typedCaseEvents.map((event) => ({
+      event_type: event.event_type,
+      created_at: event.created_at,
+    })),
   })
+  const nextStep = workflow.nextStep
+  const isComplete = workflow.isComplete
   const memorialItems = typedCaseItem.memorial_items ?? []
   const additionalUrns = typedCaseItem.additional_urns ?? []
   const soulburstItems = typedCaseItem.soulburst_items ?? []
@@ -239,12 +250,12 @@ export default async function CaseDetailPage({
         {isInternalUser ? (
           <section className="rounded-[28px] bg-white p-8 shadow-sm">
             <h2 className="text-2xl font-semibold text-slate-900">Next Action</h2>
-            {nextAllowedEventType ? (
+            {!isComplete && nextStep ? (
               <>
                 <p className="mt-3 text-sm text-slate-500">
                   The next workflow step for this case is{' '}
                   <span className="font-semibold text-slate-900">
-                    {formatCaseEventType(nextAllowedEventType)}
+                    {formatCaseEventType(nextStep)}
                   </span>
                   .
                 </p>
@@ -253,7 +264,10 @@ export default async function CaseDetailPage({
                     caseId={typedCaseItem.id}
                     caseEvents={typedCaseEvents}
                     cremationType={typedCaseItem.cremation_type}
-                    allowedEventType={nextAllowedEventType}
+                    allowedEventType={nextStep}
+                    currentStep={workflow.currentStep}
+                    nextStep={workflow.nextStep}
+                    isComplete={workflow.isComplete}
                   />
                 </div>
               </>
@@ -397,16 +411,16 @@ export default async function CaseDetailPage({
 
         {isInternalUser ? (
           <section className="rounded-[28px] bg-white p-8 shadow-sm">
-            <h2 className="text-2xl font-semibold text-slate-900">Status Controls</h2>
+            <h2 className="text-2xl font-semibold text-slate-900">Manual Status Controls</h2>
             <p className="mt-3 text-sm text-slate-500">
-              Manual status updates remain available to internal Horizon users where allowed.
+              Manual status updates are limited to manual-only states and do not replace
+              resolver-driven workflow actions.
             </p>
             <div className="mt-6">
               <StatusUpdateForm
                 id={typedCaseItem.id}
                 currentStatus={typedCaseItem.status || 'new'}
-                nextStatuses={nextStatuses}
-                disabled={typedCaseEvents.length > 0}
+                nextStatuses={manualNextStatuses}
               />
             </div>
           </section>
