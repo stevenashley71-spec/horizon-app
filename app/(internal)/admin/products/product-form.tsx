@@ -1,6 +1,7 @@
 'use client'
 
-import { useActionState } from 'react'
+import type { ChangeEvent, DragEvent } from 'react'
+import { useActionState, useRef, useState } from 'react'
 import { useFormStatus } from 'react-dom'
 
 import { saveProductAdmin } from '@/app/actions/admin-products'
@@ -50,23 +51,60 @@ function SubmitButton({ label }: { label: string }) {
 }
 
 export function ProductForm({ product }: ProductFormProps) {
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const [isDragging, setIsDragging] = useState(false)
+  const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [state, formAction] = useActionState(
     async (_previousState: ProductFormState, formData: FormData): Promise<ProductFormState> => {
       try {
-        await saveProductAdmin(formData)
+        const result = await saveProductAdmin(formData)
+        if ('error' in result && result.error) {
+          return {
+            error: result.error,
+            success: null,
+          }
+        }
+
         return {
           error: null,
           success: product ? 'Product updated successfully.' : 'Product created successfully.',
         }
       } catch (error) {
         return {
-          error: error instanceof Error ? error.message : 'Failed to save product.',
+          error: error instanceof Error ? error.message : null,
           success: null,
         }
       }
     },
     initialState
   )
+
+  function syncDroppedFile(file: File) {
+    setSelectedFile(file)
+
+    if (!fileInputRef.current) {
+      return
+    }
+
+    const transfer = new DataTransfer()
+    transfer.items.add(file)
+    fileInputRef.current.files = transfer.files
+  }
+
+  function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0] ?? null
+    setSelectedFile(file)
+  }
+
+  function handleDrop(event: DragEvent<HTMLDivElement>) {
+    event.preventDefault()
+    setIsDragging(false)
+
+    const file = event.dataTransfer.files?.[0]
+    if (file) {
+      syncDroppedFile(file)
+    }
+  }
 
   return (
     <form action={formAction} className="space-y-5 rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm">
@@ -189,6 +227,40 @@ export function ProductForm({ product }: ProductFormProps) {
         </div>
 
         <div>
+          <label className="mb-2 block text-sm font-medium text-slate-600">
+            Product Image Upload
+          </label>
+          <div
+            onClick={() => fileInputRef.current?.click()}
+            onDragOver={(event) => {
+              event.preventDefault()
+              setIsDragging(true)
+            }}
+            onDragLeave={() => setIsDragging(false)}
+            onDrop={handleDrop}
+            className={`rounded-2xl border border-dashed px-5 py-6 text-center transition-colors ${
+              isDragging ? 'border-slate-900 bg-slate-100' : 'border-slate-300 bg-slate-50'
+            }`}
+          >
+            <p className="text-base font-medium text-slate-900">
+              Drag and drop a product image here
+            </p>
+            <p className="mt-2 text-sm text-slate-500">Or click to choose an image file</p>
+            <p className="mt-3 text-sm text-slate-600">
+              {selectedFile ? `Selected: ${selectedFile.name}` : 'No file selected'}
+            </p>
+            <input
+              ref={fileInputRef}
+              type="file"
+              name="image_file"
+              accept="image/*"
+              className="hidden"
+              onChange={handleFileChange}
+            />
+          </div>
+        </div>
+
+        <div>
           <label htmlFor={`product-image-path-${product?.id ?? 'new'}`} className="mb-2 block text-sm font-medium text-slate-600">
             Image Path
           </label>
@@ -226,7 +298,7 @@ export function ProductForm({ product }: ProductFormProps) {
         </div>
       </div>
 
-      {state.error ? <p className="text-sm text-rose-700">{state.error}</p> : null}
+      {state.error && <p className="text-red-600">{state.error}</p>}
       {state.success ? <p className="text-sm text-emerald-700">{state.success}</p> : null}
 
       <div className="flex justify-end">

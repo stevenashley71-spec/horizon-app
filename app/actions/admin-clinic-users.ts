@@ -5,63 +5,37 @@ import { revalidatePath } from 'next/cache'
 import { requireTemporaryHorizonAdmin } from '@/lib/admin-auth'
 import { createServiceRoleSupabase } from '@/lib/supabase/server'
 
-export async function createClinicUserAdmin(formData: FormData) {
+export async function updateClinicUserPasswordAdmin(
+  formData: FormData
+): Promise<{ success: true }> {
   await requireTemporaryHorizonAdmin()
 
   const supabase = createServiceRoleSupabase()
-  const clinicId = String(formData.get('clinic_id') ?? '').trim()
-  const email = String(formData.get('email') ?? '').trim().toLowerCase()
+  const userId = String(formData.get('user_id') ?? '').trim()
   const password = String(formData.get('password') ?? '')
 
-  if (!clinicId) {
-    throw new Error('Clinic is required')
+  if (!userId) {
+    throw new Error('User is required')
   }
 
-  if (!email) {
-    throw new Error('Email / username is required')
+  if (!password) {
+    throw new Error('Password is required')
   }
 
-  if (password.length < 6) {
-    throw new Error('Password must be at least 6 characters')
+  if (password.length < 8) {
+    throw new Error('Password must be at least 8 characters')
   }
 
-  const { data: clinic, error: clinicError } = await supabase
-    .from('clinics')
-    .select('id, name')
-    .eq('id', clinicId)
-    .single()
-
-  if (clinicError || !clinic) {
-    throw new Error('Clinic not found')
-  }
-
-  const { data: createdUser, error: createUserError } = await supabase.auth.admin.createUser({
-    email,
+  const { error } = await supabase.auth.admin.updateUserById(userId, {
     password,
-    email_confirm: true,
   })
 
-  if (createUserError || !createdUser.user) {
-    throw new Error(createUserError?.message || 'Failed to create clinic auth user')
-  }
-
-  const { error: clinicUserError } = await supabase
-    .from('clinic_users')
-    .insert({
-      user_id: createdUser.user.id,
-      clinic_id: clinic.id,
-    })
-
-  if (clinicUserError) {
-    await supabase.auth.admin.deleteUser(createdUser.user.id)
-    throw new Error(clinicUserError.message)
+  if (error) {
+    throw new Error(error.message)
   }
 
   revalidatePath('/admin/clinic-users')
+  revalidatePath('/admin/clinics')
 
-  return {
-    success: true,
-    email,
-    clinicName: clinic.name,
-  }
+  return { success: true }
 }

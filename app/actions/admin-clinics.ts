@@ -93,13 +93,14 @@ export async function saveClinicAdmin(formData: FormData) {
   const zip = String(formData.get('zip') ?? '').trim() || null
   const phone = String(formData.get('phone') ?? '').trim() || null
   const email = String(formData.get('email') ?? '').trim() || null
+  const password = String(formData.get('password') ?? '')
   const logoAltText = String(formData.get('logo_alt_text') ?? '').trim() || null
   const removeLogo = String(formData.get('remove_logo') ?? '') === 'true'
   const logoFileEntry = formData.get('logo_file')
   const logoFile =
     logoFileEntry instanceof File && logoFileEntry.size > 0 ? logoFileEntry : null
 
-  if (!name) {
+  if (!clinicId && !name) {
     throw new Error('Clinic name is required')
   }
 
@@ -109,6 +110,7 @@ export async function saveClinicAdmin(formData: FormData) {
         logo_path: string | null
       }
     | null = null
+  let createdAuthUserId: string | null = null
 
   if (clinicId) {
     const { data, error } = await supabase
@@ -122,6 +124,50 @@ export async function saveClinicAdmin(formData: FormData) {
     }
 
     existingClinic = data
+
+    const { data: linkedClinicUser } = await supabase
+      .from('clinic_users')
+      .select('user_id')
+      .eq('clinic_id', clinicId)
+      .maybeSingle()
+
+    if (!linkedClinicUser && email && password) {
+      if (!email) {
+        throw new Error('Email / username is required')
+      }
+
+      if (!password) {
+        throw new Error('Password is required')
+      }
+
+      if (password.length < 8) {
+        throw new Error('Password must be at least 8 characters')
+      }
+
+      const { data: createdUser, error: createUserError } = await supabase.auth.admin.createUser({
+        email,
+        password,
+        email_confirm: true,
+      })
+
+      if (createUserError || !createdUser.user) {
+        throw new Error(createUserError?.message || 'Failed to create clinic auth user')
+      }
+
+      createdAuthUserId = createdUser.user.id
+
+      const { error: clinicUserError } = await supabase
+        .from('clinic_users')
+        .insert({
+          user_id: createdAuthUserId,
+          clinic_id: clinicId,
+        })
+
+      if (clinicUserError) {
+        await supabase.auth.admin.deleteUser(createdAuthUserId)
+        throw new Error(clinicUserError.message)
+      }
+    }
   }
 
   const baseFields = {
@@ -166,6 +212,32 @@ export async function saveClinicAdmin(formData: FormData) {
 
     targetClinicId = data.id
     currentLogoPath = data.logo_path
+
+    const { data: createdUser, error: createUserError } = await supabase.auth.admin.createUser({
+      email: email ?? '',
+      password,
+      email_confirm: true,
+    })
+
+    if (createUserError || !createdUser.user) {
+      await supabase.from('clinics').delete().eq('id', targetClinicId)
+      throw new Error(createUserError?.message || 'Failed to create clinic auth user')
+    }
+
+    createdAuthUserId = createdUser.user.id
+
+    const { error: clinicUserError } = await supabase
+      .from('clinic_users')
+      .insert({
+        user_id: createdAuthUserId,
+        clinic_id: targetClinicId,
+      })
+
+    if (clinicUserError) {
+      await supabase.auth.admin.deleteUser(createdAuthUserId)
+      await supabase.from('clinics').delete().eq('id', targetClinicId)
+      throw new Error(clinicUserError.message)
+    }
   }
 
   if (!targetClinicId) {
@@ -184,10 +256,16 @@ export async function saveClinicAdmin(formData: FormData) {
     nextLogoPath = uploadedLogoPath
   }
 
+  const {
+    pickup_verification_code: _pickupVerificationCode,
+    delivery_verification_code: _deliveryVerificationCode,
+    ...updateFields
+  } = baseFields
+
   const { error: updateError } = await supabase
     .from('clinics')
     .update({
-      ...baseFields,
+      ...updateFields,
       logo_path: nextLogoPath,
     })
     .eq('id', targetClinicId)
@@ -209,7 +287,7 @@ export async function saveClinicAdmin(formData: FormData) {
   return { success: true }
 }
 
-export async function setClinicActive(clinicId: string, isActive: boolean) {
+export async function setClinicActive(clinicId: string, isActive: boolean): Promise<void> {
   await requireTemporaryAdminAccess()
 
   const supabase = createServiceRoleSupabase()
@@ -218,6 +296,34 @@ export async function setClinicActive(clinicId: string, isActive: boolean) {
     .from('clinics')
     .update({
       is_active: isActive,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', clinicId)
+
+  if (error) {
+    throw new Error(error.message)
+  }
+
+  revalidatePath('/admin/clinics')
+}
+
+export async function updateClinicExitPinAdmin(
+  formData: FormData
+): Promise<{ success: true }> {
+  await requireTemporaryAdminAccess()
+
+  const supabase = createServiceRoleSupabase()
+  const clinicId = String(formData.get('clinic_id') ?? '').trim()
+  const exitPin = String(formData.get('exit_pin') ?? '')
+
+  if (!clinicId) {
+    throw new Error('Clinic is required')
+  }
+
+  const { error } = await supabase
+    .from('clinics')
+    .update({
+      exit_pin: exitPin === '' ? null : exitPin,
       updated_at: new Date().toISOString(),
     })
     .eq('id', clinicId)

@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 
 import { LogoutButton } from '@/app/components/logout-button'
+import type { UserRole } from '@/lib/auth/get-user-role'
 
 type NavItem = {
   href: string
@@ -17,11 +18,10 @@ const INTERNAL_NAV_ITEMS: NavItem[] = [
   { href: '/returns', label: 'Returns' },
   { href: '/scan', label: 'Scan' },
   { href: '/cases', label: 'Cases' },
-  { href: '/admin/clinic-users', label: 'Admin' },
 ]
 
 function isActiveInternalRoute(pathname: string, href: string) {
-  if (href === '/admin/clinic-users') {
+  if (href.startsWith('/admin')) {
     return pathname.startsWith('/admin/')
   }
 
@@ -32,12 +32,16 @@ function isActiveInternalRoute(pathname: string, href: string) {
   return pathname === href
 }
 
-export function InternalPortalNav() {
+export function InternalPortalNav({ userRole }: { userRole: UserRole }) {
   const pathname = usePathname()
+  const navItems =
+    userRole === 'admin'
+      ? [...INTERNAL_NAV_ITEMS, { href: '/admin/clinics', label: 'Admin' }]
+      : INTERNAL_NAV_ITEMS
 
   return (
     <nav className="flex flex-wrap gap-3">
-      {INTERNAL_NAV_ITEMS.map((item) => {
+      {navItems.map((item) => {
         const isActive = isActiveInternalRoute(pathname, item.href)
 
         return (

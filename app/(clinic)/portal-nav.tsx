@@ -34,16 +34,27 @@ function isActiveClinicRoute(pathname: string, href: string) {
 
 export function ClinicPortalNav() {
   const pathname = usePathname()
+  const isSubmittedScreen = pathname.startsWith('/clinic/submitted/')
+  const submittedCaseId = pathname.split('/')[3] ?? ''
+  const logoutClassName =
+    'rounded-full bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-60'
 
   return (
     <nav className="flex flex-wrap gap-3">
       {CLINIC_NAV_ITEMS.map((item) => {
         const isActive = isActiveClinicRoute(pathname, item.href)
+        const navHref = item.href
+        const shouldIntercept = isSubmittedScreen
+        const finalHref = shouldIntercept
+          ? item.href === '/cases'
+            ? `/clinic/submitted/${submittedCaseId}?pin=1&target=cases`
+            : `/clinic/submitted/${submittedCaseId}?pin=1&target=dashboard`
+          : navHref
 
         return (
           <Link
             key={item.href}
-            href={item.href}
+            href={finalHref}
             className={`rounded-full px-4 py-2 text-sm font-semibold transition-colors ${
               isActive
                 ? 'bg-emerald-900 text-white'
@@ -54,10 +65,16 @@ export function ClinicPortalNav() {
           </Link>
         )
       })}
-      <LogoutButton
-        loginPath="/clinic/login"
-        className="rounded-full bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-60"
-      />
+      {isSubmittedScreen ? (
+        <Link
+          href={`/clinic/submitted/${submittedCaseId}?pin=1&target=dashboard`}
+          className={logoutClassName}
+        >
+          Logout
+        </Link>
+      ) : (
+        <LogoutButton loginPath="/clinic/login" className={logoutClassName} />
+      )}
     </nav>
   )
 }

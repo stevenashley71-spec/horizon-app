@@ -1,5 +1,9 @@
 import { redirect } from 'next/navigation'
 
+import {
+  addCremationPricingRow,
+  saveCremationPricingRow,
+} from '@/app/actions/admin-cremation-pricing'
 import { saveClinicProductAvailability } from '@/app/actions/admin-clinic-products'
 import { AdminSectionShell } from '../admin-section-shell'
 import { getTemporaryHorizonAdminResult } from '@/lib/admin-auth'
@@ -33,8 +37,39 @@ type ClinicProductRow = {
   price_override: number | null
 }
 
+type CremationPricingRow = {
+  id: string
+  clinic_id: string | null
+  cremation_type: 'private' | 'general'
+  weight_min_lbs: number | null
+  weight_max_lbs: number | null
+  client_price: number | null
+  horizon_invoice_price: number | null
+  is_active: boolean
+  sort_order: number
+}
+
 function formatCurrency(value: number | null) {
   return typeof value === 'number' ? `$${value.toFixed(2)}` : '—'
+}
+
+function formatWeightRange(row: {
+  weight_min_lbs: number | null
+  weight_max_lbs: number | null
+}) {
+  if (row.weight_min_lbs !== null && row.weight_max_lbs !== null) {
+    return `${row.weight_min_lbs}-${row.weight_max_lbs} lbs`
+  }
+
+  if (row.weight_min_lbs !== null) {
+    return `${row.weight_min_lbs}+ lbs`
+  }
+
+  if (row.weight_max_lbs !== null) {
+    return `Up to ${row.weight_max_lbs} lbs`
+  }
+
+  return 'Unbounded'
 }
 
 export default async function ClinicProductsAdminPage({
@@ -61,6 +96,7 @@ export default async function ClinicProductsAdminPage({
 
   const params = await searchParams
   const selectedClinicId = params.clinicId?.trim() ?? ''
+  const selectedClinicQuery = selectedClinicId ? `?clinicId=${selectedClinicId}` : ''
 
   const supabase = await createServerSupabase()
 
@@ -87,6 +123,7 @@ export default async function ClinicProductsAdminPage({
   }
 
   let clinicProductOverrides = new Map<string, ClinicProductRow>()
+  let cremationPricingItems: CremationPricingRow[] = []
 
   if (selectedClinicId) {
     const { data: clinicProducts, error: clinicProductsError } = await supabase
@@ -101,9 +138,25 @@ export default async function ClinicProductsAdminPage({
     clinicProductOverrides = new Map(
       ((clinicProducts as ClinicProductRow[] | null) ?? []).map((row) => [row.product_id, row])
     )
+
+    const { data: cremationPricing, error: cremationPricingError } = await supabase
+      .from('cremation_pricing')
+      .select(
+        'id, clinic_id, cremation_type, weight_min_lbs, weight_max_lbs, client_price, horizon_invoice_price, is_active, sort_order'
+      )
+      .eq('clinic_id', selectedClinicId)
+      .order('sort_order', { ascending: true })
+      .order('cremation_type', { ascending: true })
+
+    if (cremationPricingError) {
+      throw new Error(cremationPricingError.message)
+    }
+
+    cremationPricingItems = (cremationPricing as CremationPricingRow[] | null) ?? []
   }
 
   const productItems = (products as ProductRow[] | null) ?? []
+  const addCremationPricingRowForClinic = addCremationPricingRow.bind(null, selectedClinicId)
 
   return (
     <AdminSectionShell>
@@ -258,6 +311,140 @@ export default async function ClinicProductsAdminPage({
             )}
           </section>
         )}
+
+        {selectedClinic ? (
+          <section className="rounded-[24px] border border-slate-200 bg-white shadow-sm">
+            <div className="border-b border-slate-200 px-6 py-5">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-2xl font-semibold text-slate-900">Cremation Pricing</h2>
+                  <p className="mt-1 text-sm text-slate-500">
+                    Manage clinic-specific cremation pricing rows by cremation type and weight range.
+                  </p>
+                </div>
+                <form action={addCremationPricingRowForClinic}>
+                  <button
+                    type="submit"
+                    className="rounded-lg bg-slate-900 px-4 py-2 font-medium text-white hover:bg-slate-800"
+                  >
+                    Add Row
+                  </button>
+                </form>
+              </div>
+            </div>
+
+            {cremationPricingItems.length === 0 ? (
+              <div className="p-6">
+                <p className="text-slate-600">No cremation pricing rows saved for this clinic yet.</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="min-w-full border-collapse">
+                  <thead className="bg-slate-50">
+                    <tr className="text-left">
+                      <th className="px-6 py-4 text-sm font-semibold text-slate-600">Cremation Type</th>
+                      <th className="px-6 py-4 text-sm font-semibold text-slate-600">Weight Range</th>
+                      <th className="px-6 py-4 text-sm font-semibold text-slate-600">Client Price</th>
+                      <th className="px-6 py-4 text-sm font-semibold text-slate-600">Horizon Invoice Price</th>
+                      <th className="px-6 py-4 text-sm font-semibold text-slate-600">Active</th>
+                      <th className="px-6 py-4 text-sm font-semibold text-slate-600">Edit</th>
+                      <th className="px-6 py-4 text-sm font-semibold text-slate-600">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {cremationPricingItems.map((row) => (
+                      <tr key={row.id} className="border-t border-slate-200 align-top">
+                        <td className="px-6 py-4 text-sm text-slate-700">{row.cremation_type}</td>
+                        <td className="px-6 py-4 text-sm text-slate-700">{formatWeightRange(row)}</td>
+                        <td className="px-6 py-4 text-sm text-slate-700">
+                          {formatCurrency(row.client_price)}
+                        </td>
+                        <td className="px-6 py-4 text-sm text-slate-700">
+                          {formatCurrency(row.horizon_invoice_price)}
+                        </td>
+                        <td className="px-6 py-4 text-sm">
+                          <span
+                            className={`rounded-full px-3 py-1 font-medium ${
+                              row.is_active
+                                ? 'bg-emerald-100 text-emerald-800'
+                                : 'bg-slate-200 text-slate-700'
+                            }`}
+                          >
+                            {row.is_active ? 'Active' : 'Inactive'}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 text-sm text-slate-700">
+                          <form action={saveCremationPricingRow} className="grid gap-3 md:grid-cols-6">
+                            <input type="hidden" name="id" value={row.id} />
+                            <input type="hidden" name="clinic_id" value={selectedClinicId} />
+                            <input type="hidden" name="sort_order" value={row.sort_order} />
+                            <select
+                              name="cremation_type"
+                              defaultValue={row.cremation_type}
+                              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-slate-900"
+                            >
+                              <option value="private">private</option>
+                              <option value="general">general</option>
+                            </select>
+                            <input
+                              name="weight_min_lbs"
+                              type="number"
+                              step="0.01"
+                              defaultValue={row.weight_min_lbs ?? ''}
+                              placeholder="Min lbs"
+                              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-slate-900"
+                            />
+                            <input
+                              name="weight_max_lbs"
+                              type="number"
+                              step="0.01"
+                              defaultValue={row.weight_max_lbs ?? ''}
+                              placeholder="Max lbs"
+                              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-slate-900"
+                            />
+                            <input
+                              name="client_price"
+                              type="number"
+                              step="0.01"
+                              defaultValue={row.client_price ?? ''}
+                              placeholder="Client"
+                              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-slate-900"
+                            />
+                            <input
+                              name="horizon_invoice_price"
+                              type="number"
+                              step="0.01"
+                              defaultValue={row.horizon_invoice_price ?? ''}
+                              placeholder="Invoice"
+                              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-slate-900"
+                            />
+                            <select
+                              name="is_active"
+                              defaultValue={row.is_active ? 'true' : 'false'}
+                              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-slate-900"
+                            >
+                              <option value="true">Active</option>
+                              <option value="false">Inactive</option>
+                            </select>
+                            <button
+                              type="submit"
+                              className="rounded-lg bg-slate-900 px-4 py-2 font-medium text-white hover:bg-slate-800"
+                            >
+                              Save
+                            </button>
+                          </form>
+                        </td>
+                        <td className="px-6 py-4 text-sm text-slate-500">
+                          Sort order: {row.sort_order}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+        ) : null}
     </AdminSectionShell>
   )
 }

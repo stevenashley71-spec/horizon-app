@@ -1,10 +1,17 @@
+import { getUserRole } from '@/lib/auth/get-user-role'
 import { InternalPortalNav } from '@/app/(internal)/portal-nav'
 
-export function InternalPortalFrame({
+export async function InternalPortalFrame({
   children,
 }: Readonly<{
   children: React.ReactNode
 }>) {
+  const userRole = await getUserRole()
+
+  if (!userRole || (userRole.role !== 'admin' && userRole.role !== 'horizon_staff')) {
+    throw new Error('Internal user context is required')
+  }
+
   return (
     <main className="min-h-screen bg-[#f4f3ee] px-6 py-8 md:px-10">
       <div className="mx-auto max-w-7xl space-y-8">
@@ -20,7 +27,7 @@ export function InternalPortalFrame({
           </p>
 
           <div className="mt-6 border-t border-slate-200 pt-6">
-            <InternalPortalNav />
+            <InternalPortalNav userRole={userRole.role} />
           </div>
         </section>
 

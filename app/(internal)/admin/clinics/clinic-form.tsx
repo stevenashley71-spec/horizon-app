@@ -172,47 +172,19 @@ export function ClinicForm({ clinic }: ClinicFormProps) {
             className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-slate-900"
           />
         </div>
-        <div>
-          <label htmlFor={`clinic-code-${clinic?.id ?? 'new'}`} className="mb-2 block text-sm font-medium text-slate-600">
-            Code
-          </label>
-          <input
-            id={`clinic-code-${clinic?.id ?? 'new'}`}
-            name="code"
-            defaultValue={clinic?.code ?? ''}
-            className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-slate-900"
-          />
-        </div>
-        <div>
-          <label
-            htmlFor={`clinic-pickup-verification-code-${clinic?.id ?? 'new'}`}
-            className="mb-2 block text-sm font-medium text-slate-600"
-          >
-            Pickup Verification Code
-          </label>
-          <input
-            id={`clinic-pickup-verification-code-${clinic?.id ?? 'new'}`}
-            name="pickup_verification_code"
-            type="text"
-            defaultValue={clinic?.pickup_verification_code ?? ''}
-            className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-slate-900"
-          />
-        </div>
-        <div>
-          <label
-            htmlFor={`clinic-delivery-verification-code-${clinic?.id ?? 'new'}`}
-            className="mb-2 block text-sm font-medium text-slate-600"
-          >
-            Delivery Verification Code
-          </label>
-          <input
-            id={`clinic-delivery-verification-code-${clinic?.id ?? 'new'}`}
-            type="text"
-            value={clinic?.delivery_verification_code ?? ''}
-            readOnly
-            className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-slate-900"
-          />
-        </div>
+        {!clinic ? (
+          <div>
+            <label htmlFor="clinic-password-new" className="mb-2 block text-sm font-medium text-slate-600">
+              Initial Password
+            </label>
+            <input
+              id="clinic-password-new"
+              name="password"
+              type="password"
+              className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-slate-900"
+            />
+          </div>
+        ) : null}
         <div className="md:col-span-2">
           <label htmlFor={`clinic-address-1-${clinic?.id ?? 'new'}`} className="mb-2 block text-sm font-medium text-slate-600">
             Address Line 1

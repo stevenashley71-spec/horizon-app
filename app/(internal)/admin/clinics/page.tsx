@@ -1,10 +1,11 @@
+import Link from 'next/link'
 import { redirect } from 'next/navigation'
+import QRCode from 'qrcode'
 
-import { setClinicActive } from '@/app/actions/admin-clinics'
 import { AdminSectionShell } from '../admin-section-shell'
-import { ClinicForm } from './clinic-form'
+import { ClinicAccordionList } from './clinic-accordion-list'
 import { getTemporaryHorizonAdminResult } from '@/lib/admin-auth'
-import { createServerSupabase } from '@/lib/supabase/server'
+import { createServerSupabase, createServiceRoleSupabase } from '@/lib/supabase/server'
 
 type ClinicRow = {
   id: string
@@ -22,6 +23,11 @@ type ClinicRow = {
   logo_path: string | null
   logo_alt_text: string | null
   is_active: boolean
+}
+
+type ClinicUserRow = {
+  clinic_id: string
+  user_id: string
 }
 
 async function getLogoUrl(logoPath: string | null) {
@@ -54,22 +60,54 @@ export default async function ClinicsAdminPage() {
     )
   }
 
-  const supabase = await createServerSupabase()
-  const { data: clinics, error } = await supabase
-    .from('clinics')
-    .select(
-      'id, name, code, pickup_verification_code, delivery_verification_code, address_line_1, address_line_2, city, state, zip, phone, email, logo_path, logo_alt_text, is_active'
-    )
-    .order('name', { ascending: true })
+  const supabase = createServiceRoleSupabase()
+  const [{ data: clinics, error }, { data: clinicUsers, error: clinicUsersError }, usersResponse] =
+    await Promise.all([
+      supabase
+        .from('clinics')
+        .select(
+          'id, name, code, pickup_verification_code, delivery_verification_code, address_line_1, address_line_2, city, state, zip, phone, email, logo_path, logo_alt_text, is_active'
+        )
+        .order('name', { ascending: true }),
+      supabase
+        .from('clinic_users')
+        .select('clinic_id, user_id'),
+      supabase.auth.admin.listUsers(),
+    ])
 
   if (error) {
     throw new Error(error.message)
   }
 
+  if (clinicUsersError) {
+    throw new Error(clinicUsersError.message)
+  }
+
+  if (usersResponse.error) {
+    throw new Error(usersResponse.error.message)
+  }
+
+  const clinicUserItems = (clinicUsers as ClinicUserRow[] | null) ?? []
+  const userEmailMap = new Map(
+    (usersResponse.data.users ?? []).map((user) => [user.id, user.email ?? null])
+  )
+
   const clinicItems = await Promise.all(
     ((clinics as ClinicRow[] | null) ?? []).map(async (clinic) => ({
       ...clinic,
       logo_url: await getLogoUrl(clinic.logo_path),
+      pickup_qr: clinic.pickup_verification_code
+        ? await QRCode.toDataURL(clinic.pickup_verification_code)
+        : null,
+      delivery_qr: clinic.delivery_verification_code
+        ? await QRCode.toDataURL(clinic.delivery_verification_code)
+        : null,
+      linked_users: clinicUserItems
+        .filter((clinicUser) => clinicUser.clinic_id === clinic.id)
+        .map((clinicUser) => ({
+          user_id: clinicUser.user_id,
+          email: userEmailMap.get(clinicUser.user_id) ?? null,
+        })),
     }))
   )
 
@@ -83,10 +121,16 @@ export default async function ClinicsAdminPage() {
             <p className="mt-3 text-xl text-slate-500">
               Manage clinic records, activation, and clinic branding.
             </p>
+            <div className="mt-6">
+              <Link
+                href="/admin/clinics/new"
+                className="inline-flex rounded-lg bg-slate-900 px-4 py-2 font-medium text-white hover:bg-slate-800"
+              >
+                Create New Clinic
+              </Link>
+            </div>
           </div>
         </section>
-
-        <ClinicForm />
 
         <section className="space-y-6">
           <div>
@@ -101,32 +145,7 @@ export default async function ClinicsAdminPage() {
               <p className="text-slate-600">No clinics have been created yet.</p>
             </div>
           ) : (
-            <div className="space-y-6">
-              {clinicItems.map((clinic) => (
-                <div key={clinic.id} className="space-y-4">
-                  <div className="flex justify-end">
-                    <form
-                      action={async () => {
-                        'use server'
-                        await setClinicActive(clinic.id, !clinic.is_active)
-                      }}
-                    >
-                      <button
-                        type="submit"
-                        className={`rounded-lg px-4 py-2 font-medium ${
-                          clinic.is_active
-                            ? 'bg-slate-200 text-slate-900 hover:bg-slate-300'
-                            : 'bg-emerald-900 text-white hover:bg-emerald-800'
-                        }`}
-                      >
-                        {clinic.is_active ? 'Deactivate Clinic' : 'Activate Clinic'}
-                      </button>
-                    </form>
-                  </div>
-                  <ClinicForm clinic={clinic} />
-                </div>
-              ))}
-            </div>
+            <ClinicAccordionList clinicItems={clinicItems} />
           )}
         </section>
     </AdminSectionShell>

@@ -124,8 +124,62 @@ export type ClinicResolvedProduct = {
   imageUrl: string | null
   imageAlt: string | null
   isIncludedByDefault: boolean
+  includedInCremation: boolean
   sortOrder: number
   metadata: Record<string, never>
+}
+
+export type ClinicIntakePricingProfileScope = 'clinic' | 'direct' | 'public'
+
+export type ClinicIntakeResolvedPricingSource =
+  | 'catalog_base_price'
+  | 'clinic_override'
+  | 'direct_price'
+  | 'public_price'
+  | 'unavailable'
+
+export type ClinicIntakeResolvedCremationType = 'private' | 'general'
+
+export type ClinicIntakeResolvedCremationPricingRow = {
+  key: string
+  cremationType: ClinicIntakeResolvedCremationType
+  weightClassLabel: string
+  weightMinLbs: number | null
+  weightMaxLbs: number | null
+  pricingSource: ClinicIntakeResolvedPricingSource
+  clientVisiblePriceCents: number | null
+  horizonInternalPriceCents: number | null
+  active: boolean
+  currency: 'USD'
+  metadata: Record<string, unknown>
+}
+
+export type ClinicIntakeResolvedProductPricingRow = {
+  productId: string
+  category: ClinicResolvedProduct['category']
+  name: string
+  pricingSource: ClinicIntakeResolvedPricingSource
+  clientVisiblePriceCents: number | null
+  horizonInternalPriceCents: number | null
+  visibleToClinic: boolean
+  shownInClientIntake: boolean
+  includedInCremation: boolean
+  currency: 'USD'
+  metadata: {
+    isIncludedByDefault: boolean
+  }
+}
+
+export type ClinicIntakeResolvedPricing = {
+  profile: {
+    scope: ClinicIntakePricingProfileScope
+    sourceClinicId: string | null
+    sourceClinicCode: string | null
+  }
+  cremationPricing: ClinicIntakeResolvedCremationPricingRow[]
+  productPricing: ClinicIntakeResolvedProductPricingRow[]
+  resolvedAt: string
+  resolverVersion: string
 }
 
 export type ClinicIntakeCatalog = {
@@ -141,4 +195,5 @@ export type ClinicIntakeCatalog = {
   premiumUrns: ClinicResolvedProduct[]
   soulBursts: ClinicResolvedProduct[]
   addOns: ClinicResolvedProduct[]
+  pricing: ClinicIntakeResolvedPricing
 }

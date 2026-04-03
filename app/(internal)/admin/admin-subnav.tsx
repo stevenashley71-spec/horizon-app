@@ -9,7 +9,6 @@ type AdminNavItem = {
 }
 
 const ADMIN_NAV_ITEMS: AdminNavItem[] = [
-  { href: '/admin/clinic-users', label: 'Clinic Users' },
   { href: '/admin/products', label: 'Products' },
   { href: '/admin/clinics', label: 'Clinics' },
   { href: '/admin/clinic-products', label: 'Clinic Products' },

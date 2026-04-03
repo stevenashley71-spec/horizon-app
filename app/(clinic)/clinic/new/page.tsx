@@ -1,9 +1,9 @@
 import { loadIntakeDraft } from '@/app/actions/intake/load-intake-draft'
 
-import { ClinicIntakeForm } from '../clinic-intake-form'
+import { ClinicIntakeStartScreen } from '../clinic-intake-start-screen'
 
 export default async function ClinicNewPage() {
   const intake = await loadIntakeDraft()
 
-  return <ClinicIntakeForm intake={intake} />
+  return <ClinicIntakeStartScreen intake={intake} />
 }

@@ -34,7 +34,7 @@ export default async function InternalLayout({
           </p>
 
           <div className="mt-6 border-t border-slate-200 pt-6">
-            <InternalPortalNav />
+            <InternalPortalNav userRole={userRole.role} />
           </div>
         </section>
 
