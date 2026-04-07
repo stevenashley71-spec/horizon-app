@@ -14,6 +14,10 @@ type LoadedCase = {
   nextStep: string | null
   nextStepCompletionCode: string | null
   isComplete: boolean
+  allowedNextStepDetails: {
+    code: string
+    requiresScan: boolean
+  }[]
 }
 
 type LoadedCaseEvent = {
@@ -89,6 +93,7 @@ export async function loadCaseWithEvents(caseNumber: string): Promise<{
       nextStep: workflow.nextStep,
       nextStepCompletionCode: workflow.nextStepCompletionCode,
       isComplete: workflow.isComplete,
+      allowedNextStepDetails: workflow.allowedNextStepDetails,
     },
     caseEvents: typedCaseEvents,
   }

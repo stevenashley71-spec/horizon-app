@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useActionState } from 'react'
 import { useFormStatus } from 'react-dom'
@@ -95,6 +96,31 @@ export function CaseEventForm({
             The next available workflow event is{' '}
             {nextStep ? formatCaseEventType(nextStep) : 'none'}.
           </p>
+          {state.error ? <p className="text-sm text-red-700">{state.error}</p> : null}
+          {state.success ? <p className="text-sm text-emerald-700">{state.success}</p> : null}
+        </div>
+      )
+    }
+
+    if (allowedEventType === 'picked_up') {
+      return (
+        <div className="space-y-4">
+          <div className="rounded-xl border border-slate-200 px-4 py-3">
+            <div className="text-sm font-medium text-slate-500">Next required event</div>
+            <div className="mt-1 text-sm font-semibold text-slate-900">
+              {formatCaseEventType(allowedEventType)}
+            </div>
+          </div>
+
+          <div className="flex flex-wrap gap-3">
+            <Link
+              href="/scan"
+              className="rounded-lg bg-slate-900 px-4 py-2 text-white transition-colors hover:bg-slate-800"
+            >
+              Go to Scan Station for Pickup
+            </Link>
+          </div>
+
           {state.error ? <p className="text-sm text-red-700">{state.error}</p> : null}
           {state.success ? <p className="text-sm text-emerald-700">{state.success}</p> : null}
         </div>

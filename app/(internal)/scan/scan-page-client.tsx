@@ -17,6 +17,10 @@ type LoadedCase = {
   nextStep: string | null
   nextStepCompletionCode: string | null
   isComplete: boolean
+  allowedNextStepDetails: {
+    code: string
+    requiresScan: boolean
+  }[]
 }
 
 type LoadedCaseEvent = {
@@ -82,6 +86,10 @@ export default function ScanPageClient() {
   const nextStep = loadedCase?.nextStep ?? null
   const nextStepCompletionCode = loadedCase?.nextStepCompletionCode ?? null
   const isComplete = loadedCase?.isComplete ?? false
+  const stepDetails = loadedCase?.allowedNextStepDetails.find(
+    (step) => step.code === nextStep
+  )
+  const requiresScan = stepDetails?.requiresScan === true
   const upcomingStep = null
   const pickupVerificationInstructions =
     nextStep === 'picked_up'
@@ -193,6 +201,10 @@ export default function ScanPageClient() {
       }
 
       if (nextStep === 'picked_up') {
+        if (requiresScan && !scannedValue) {
+          throw new Error('This step requires a valid scan before completion.')
+        }
+
         if (!parsedClinicPickupScan) {
           throw new Error('Invalid clinic pickup verification code.')
         }
@@ -236,6 +248,10 @@ export default function ScanPageClient() {
         throw new Error(
           `Invalid completion scan. Expected ${expectedCompletionCode}, received ${scannedValue}`
         )
+      }
+
+      if (requiresScan && !scannedValue) {
+        throw new Error('This step requires a valid scan before completion.')
       }
 
         await addCaseEvent(loadedCase.id, nextStep, {
