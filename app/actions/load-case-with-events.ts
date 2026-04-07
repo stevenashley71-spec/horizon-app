@@ -1,6 +1,6 @@
 'use server'
 
-import { getTemporaryHorizonAdminResult } from '@/lib/admin-auth'
+import { getInternalHorizonUserResult } from '@/lib/internal-auth'
 import { createServiceRoleSupabase } from '@/lib/supabase/server'
 import { resolveWorkflow } from '@/lib/workflow/resolve-workflow'
 
@@ -28,10 +28,10 @@ export async function loadCaseWithEvents(caseNumber: string): Promise<{
   caseItem: LoadedCase
   caseEvents: LoadedCaseEvent[]
 }> {
-  const adminResult = await getTemporaryHorizonAdminResult()
+  const userResult = await getInternalHorizonUserResult()
 
-  if (!adminResult || adminResult.kind !== 'ok') {
-    throw new Error('Horizon admin access is required')
+  if (!userResult || userResult.kind !== 'ok') {
+    throw new Error('Internal Horizon access is required')
   }
 
   const supabase = createServiceRoleSupabase()

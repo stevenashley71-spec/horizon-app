@@ -1,56 +1,66 @@
 import { cookies } from 'next/headers'
 import { createClient } from '@supabase/supabase-js'
 
-async function getSupabaseAccessToken() {
-  const cookieStore = await cookies()
-  const authCookie = cookieStore
-    .getAll()
-    .find((cookie) => cookie.name.includes('auth-token'))
-
-  if (!authCookie?.value) {
-    return null
-  }
-
-  try {
-    const parsedCookie = JSON.parse(decodeURIComponent(authCookie.value))
-
-    if (Array.isArray(parsedCookie) && typeof parsedCookie[0] === 'string') {
-      return parsedCookie[0]
-    }
-
-    if (
-      parsedCookie &&
-      typeof parsedCookie === 'object' &&
-      'access_token' in parsedCookie &&
-      typeof parsedCookie.access_token === 'string'
-    ) {
-      return parsedCookie.access_token
-    }
-  } catch {
-    return null
-  }
-
-  return null
-}
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+const supabaseHost = new URL(supabaseUrl).hostname.split('.')[0]
+const storageKey = `sb-${supabaseHost}-auth-token`
 
 export async function createServerAuthSupabase() {
-  const accessToken = await getSupabaseAccessToken()
+  const cookieStore = await cookies()
+  const mutableCookieStore = cookieStore as typeof cookieStore & {
+    set?: (
+      input:
+        | string
+        | {
+            name: string
+            value: string
+            path?: string
+            maxAge?: number
+          }
+    ) => void
+  }
+
+  const cookieStorage = {
+    getItem(key: string) {
+      return cookieStore.get(key)?.value ?? null
+    },
+    setItem(key: string, value: string) {
+      if (!mutableCookieStore.set) {
+        return
+      }
+
+      mutableCookieStore.set({
+        name: key,
+        value,
+        path: '/',
+      })
+    },
+    removeItem(key: string) {
+      if (!mutableCookieStore.set) {
+        return
+      }
+
+      mutableCookieStore.set({
+        name: key,
+        value: '',
+        path: '/',
+        maxAge: 0,
+      })
+    },
+  }
 
   return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    supabaseUrl,
+    supabaseAnonKey,
     {
       auth: {
+        storageKey,
         autoRefreshToken: false,
-        persistSession: false,
+        persistSession: true,
+        detectSessionInUrl: false,
+        storage: cookieStorage,
       },
-      global: accessToken
-        ? {
-            headers: {
-              Authorization: `Bearer ${accessToken}`,
-            },
-          }
-        : undefined,
     }
   )
 }
