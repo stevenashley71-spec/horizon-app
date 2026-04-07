@@ -1,8 +1,6 @@
 import Link from 'next/link'
-import { revalidatePath } from 'next/cache'
 import Script from 'next/script'
 
-import { addCaseEvent } from '@/app/actions/add-case-event'
 import { CASE_EVENT_TYPES } from '@/lib/case-events'
 import { createServiceRoleSupabase } from '@/lib/supabase/server'
 import { resolveWorkflow } from '@/lib/workflow/resolve-workflow'
@@ -71,7 +69,6 @@ export default async function PickupPage() {
       'id, case_number, pet_name, owner_name, clinic_id, clinic_name, status, created_at, cremation_type, clinics(pickup_verification_code)'
     )
     .is('archived_at', null)
-    .not('status', 'in', '("completed","cancelled")')
     .order('created_at', { ascending: true })
 
   if (error) {
@@ -283,20 +280,12 @@ export default async function PickupPage() {
                                   >
                                     View Case
                                   </Link>
-                                  <form
-                                    action={async () => {
-                                      'use server'
-                                      await addCaseEvent(caseItem.id, CASE_EVENT_TYPES.PICKED_UP)
-                                      revalidatePath('/pickup')
-                                    }}
+                                  <Link
+                                    href="/scan"
+                                    className="rounded-lg bg-emerald-900 px-4 py-2 font-medium text-white hover:bg-emerald-800"
                                   >
-                                    <button
-                                      type="submit"
-                                      className="rounded-lg bg-emerald-900 px-4 py-2 font-medium text-white hover:bg-emerald-800"
-                                    >
-                                      Mark Picked Up
-                                    </button>
-                                  </form>
+                                    Go to Scan Station
+                                  </Link>
                                 </div>
                               </td>
                             </tr>
