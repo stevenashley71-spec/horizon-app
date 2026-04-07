@@ -52,6 +52,11 @@ export async function addCremationPricingRow(clinicId: string) {
   const { error } = await supabase.from('cremation_pricing').insert({
     clinic_id: normalizedClinicId,
     cremation_type: 'private',
+    intake_type: 'standard',
+    client_price: 0,
+    horizon_invoice_price: 0,
+    weight_min_lbs: 0,
+    weight_max_lbs: 0,
     is_active: true,
     sort_order: nextSortOrder,
   })
@@ -70,6 +75,7 @@ export async function saveCremationPricingRow(formData: FormData) {
   const id = String(formData.get('id') ?? '').trim()
   const clinicId = String(formData.get('clinic_id') ?? '').trim()
   const cremationType = String(formData.get('cremation_type') ?? '').trim()
+  const intakeType = String(formData.get('intake_type') ?? 'standard').trim() || 'standard'
   const weightMinValue = String(formData.get('weight_min_lbs') ?? '').trim()
   const weightMaxValue = String(formData.get('weight_max_lbs') ?? '').trim()
   const clientPriceValue = String(formData.get('client_price') ?? '').trim()
@@ -83,6 +89,15 @@ export async function saveCremationPricingRow(formData: FormData) {
 
   if (cremationType !== 'private' && cremationType !== 'general') {
     throw new Error('Cremation type must be private or general')
+  }
+
+  if (
+    intakeType !== 'standard' &&
+    intakeType !== 'employee' &&
+    intakeType !== 'good_samaritan' &&
+    intakeType !== 'donation'
+  ) {
+    throw new Error('Intake type must be standard, employee, good_samaritan, or donation')
   }
 
   const weightMinLbs = parseNullableNonNegativeNumber(weightMinValue, 'Minimum weight')
@@ -113,13 +128,13 @@ export async function saveCremationPricingRow(formData: FormData) {
       id,
       clinic_id: clinicId,
       cremation_type: cremationType,
+      intake_type: intakeType,
       weight_min_lbs: weightMinLbs,
       weight_max_lbs: weightMaxLbs,
       client_price: clientPrice,
       horizon_invoice_price: horizonInvoicePrice,
       is_active: isActive,
       sort_order: sortOrder,
-      updated_at: new Date().toISOString(),
     },
     { onConflict: 'id' }
   )

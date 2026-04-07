@@ -4,6 +4,7 @@ import { useActionState, useRef, useState } from 'react'
 
 import { updateClinicUserPasswordAdmin } from '@/app/actions/admin-clinic-users'
 import {
+  archiveClinicAdmin,
   saveClinicAdmin,
   setClinicActive,
   updateClinicExitPinAdmin,
@@ -26,6 +27,8 @@ type ClinicItem = {
   logo_path: string | null
   logo_alt_text: string | null
   logo_url: string | null
+  allows_donation_intake: boolean
+  archived_at: string | null
   is_active: boolean
   pickup_qr: string | null
   delivery_qr: string | null
@@ -173,7 +176,9 @@ export function ClinicAccordionList({ clinicItems }: { clinicItems: ClinicItem[]
         return (
           <div
             key={clinic.id}
-            className="overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-sm"
+            className={`overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-sm ${
+              clinic.archived_at ? 'opacity-75' : ''
+            }`}
           >
             <button
               type="button"
@@ -182,22 +187,33 @@ export function ClinicAccordionList({ clinicItems }: { clinicItems: ClinicItem[]
             >
               <div>
                 <h3 className="text-2xl font-semibold text-slate-900">{clinic.name}</h3>
-                <span
-                  className={`mt-3 inline-flex rounded-full px-3 py-1 text-sm font-medium ${
-                    clinic.is_active
-                      ? 'bg-emerald-100 text-emerald-800'
-                      : 'bg-slate-200 text-slate-700'
-                  }`}
-                >
-                  {clinic.is_active ? 'Active' : 'Inactive'}
-                </span>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <span
+                    className={`inline-flex rounded-full px-3 py-1 text-sm font-medium ${
+                      clinic.is_active
+                        ? 'bg-emerald-100 text-emerald-800'
+                        : 'bg-slate-200 text-slate-700'
+                    }`}
+                  >
+                    {clinic.is_active ? 'Active' : 'Inactive'}
+                  </span>
+                  {clinic.archived_at ? (
+                    <span className="inline-flex rounded-full bg-stone-200 px-3 py-1 text-sm font-medium text-stone-700">
+                      Archived
+                    </span>
+                  ) : null}
+                </div>
               </div>
               <span className="text-2xl font-medium text-slate-500">{isOpen ? '−' : '+'}</span>
             </button>
 
             {isOpen ? (
               <div className="border-t border-slate-200 px-6 py-6">
-                <div className="flex justify-end">
+                <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                  Clinics cannot be deleted once created. Deactivate instead to preserve historical records.
+                </div>
+
+                <div className="flex justify-end gap-3">
                   <form action={setClinicActive.bind(null, clinic.id, !clinic.is_active)}>
                     <button
                       type="submit"
@@ -210,6 +226,32 @@ export function ClinicAccordionList({ clinicItems }: { clinicItems: ClinicItem[]
                       {clinic.is_active ? 'Deactivate Clinic' : 'Activate Clinic'}
                     </button>
                   </form>
+
+                  {!clinic.is_active ? (
+                    <form
+                      action={archiveClinicAdmin.bind(null, clinic.id)}
+                      onSubmit={(event) => {
+                        if (
+                          clinic.archived_at ||
+                          window.confirm(
+                            'Archive this clinic? This will hide it from active use but preserve all records.'
+                          )
+                        ) {
+                          return
+                        }
+
+                        event.preventDefault()
+                      }}
+                    >
+                      <button
+                        type="submit"
+                        disabled={Boolean(clinic.archived_at)}
+                        className="rounded-lg bg-stone-200 px-4 py-2 font-medium text-stone-800 hover:bg-stone-300 disabled:cursor-not-allowed disabled:bg-stone-100 disabled:text-stone-500"
+                      >
+                        {clinic.archived_at ? 'Archived' : 'Archive Clinic'}
+                      </button>
+                    </form>
+                  ) : null}
                 </div>
 
                 <div className="mt-6 grid gap-4 md:grid-cols-2">

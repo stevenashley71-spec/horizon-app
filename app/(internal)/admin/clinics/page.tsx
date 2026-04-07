@@ -22,6 +22,8 @@ type ClinicRow = {
   email: string | null
   logo_path: string | null
   logo_alt_text: string | null
+  allows_donation_intake: boolean
+  archived_at: string | null
   is_active: boolean
 }
 
@@ -66,7 +68,7 @@ export default async function ClinicsAdminPage() {
       supabase
         .from('clinics')
         .select(
-          'id, name, code, pickup_verification_code, delivery_verification_code, address_line_1, address_line_2, city, state, zip, phone, email, logo_path, logo_alt_text, is_active'
+          'id, name, code, pickup_verification_code, delivery_verification_code, address_line_1, address_line_2, city, state, zip, phone, email, logo_path, logo_alt_text, allows_donation_intake, archived_at, is_active'
         )
         .order('name', { ascending: true }),
       supabase

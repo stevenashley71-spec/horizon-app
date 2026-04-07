@@ -14,6 +14,8 @@ export async function saveClinicProductAvailability(formData: FormData) {
   const productId = String(formData.get('product_id') ?? '').trim()
   const isActive = String(formData.get('is_active') ?? '').trim() === 'true'
   const priceOverrideValue = String(formData.get('price_override') ?? '').trim()
+  const includedInEmployeePet =
+    String(formData.get('included_in_employee_pet') ?? '').trim() === 'true'
 
   if (!clinicId || !productId) {
     throw new Error('Clinic and product are required')
@@ -39,6 +41,7 @@ export async function saveClinicProductAvailability(formData: FormData) {
         product_id: productId,
         is_active: isActive,
         price_override: priceOverride,
+        included_in_employee_pet: includedInEmployeePet,
         updated_at: new Date().toISOString(),
       },
       { onConflict: 'clinic_id,product_id' }

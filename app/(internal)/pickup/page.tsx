@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { revalidatePath } from 'next/cache'
+import Script from 'next/script'
 
 import { addCaseEvent } from '@/app/actions/add-case-event'
 import { CASE_EVENT_TYPES } from '@/lib/case-events'
@@ -69,6 +70,7 @@ export default async function PickupPage() {
     .select(
       'id, case_number, pet_name, owner_name, clinic_id, clinic_name, status, created_at, cremation_type, clinics(pickup_verification_code)'
     )
+    .is('archived_at', null)
     .not('status', 'in', '("completed","cancelled")')
     .order('created_at', { ascending: true })
 
@@ -203,35 +205,11 @@ export default async function PickupPage() {
 
   return (
     <div>
-        <style>{`
-          @media screen {
-            .pickup-print-sheets {
-              display: none;
-            }
-          }
-
-          @media print {
-            .pickup-screen-ui {
-              display: none !important;
-            }
-
-            .pickup-print-sheets {
-              display: block;
-            }
-
-            .pickup-print-sheet {
-              break-after: page;
-              page-break-after: always;
-              min-height: 100vh;
-              padding: 24px;
-            }
-
-            .pickup-print-sheet:last-child {
-              break-after: auto;
-              page-break-after: auto;
-            }
-          }
-        `}</style>
+      <style>{`
+        .pickup-print-sheets {
+          display: none;
+        }
+      `}</style>
 
         <div className="pickup-screen-ui">
           <h1 className="text-4xl font-bold tracking-tight text-slate-900 md:text-5xl">
@@ -339,106 +317,80 @@ export default async function PickupPage() {
               <section key={`print-${caseItem.id}`} className="pickup-print-sheet">
                 {(() => {
                   const caseQrPayload = `HPC_CASE:${caseItem.case_number ?? ''}`
-                  const clinicQrPayload =
-                    caseItem.clinic_id && caseItem.pickup_verification_code
-                      ? `HPC_CLINIC_PICKUP:${caseItem.clinic_id}:${caseItem.pickup_verification_code}`
-                      : null
 
                   return (
-                <div className="mx-auto max-w-3xl rounded-[24px] border border-slate-300 p-8">
-                  <div className="border-b border-slate-300 pb-4">
-                    <div className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-500">
+                <div className="pickup-print-card mx-auto max-w-3xl rounded-[24px] border border-slate-300 p-8">
+                  <div className="pickup-print-header border-b border-slate-300 pb-4">
+                    <div className="pickup-print-eyebrow text-sm font-semibold uppercase tracking-[0.2em] text-slate-500">
                       Horizon Pickup Sheet
                     </div>
-                    <h1 className="mt-2 text-3xl font-bold text-slate-900">
+                    <h1 className="pickup-print-title mt-2 text-3xl font-bold text-slate-900">
                       {caseItem.case_number || 'Case Pending Number'}
                     </h1>
-                    <p className="mt-2 text-lg text-slate-700">
+                    <p className="pickup-print-subtitle mt-2 text-lg text-slate-700">
                       {clinicName}
                     </p>
                   </div>
 
-                  <div className="mt-8 grid gap-6 md:grid-cols-2">
+                  <div className="pickup-print-details mt-8 grid gap-6 md:grid-cols-2">
                     <div>
-                      <div className="text-sm font-medium uppercase tracking-wide text-slate-500">
+                      <div className="pickup-print-detail-label text-sm font-medium uppercase tracking-wide text-slate-500">
                         Pet Name
                       </div>
-                      <div className="mt-2 text-2xl font-semibold text-slate-900">
+                      <div className="pickup-print-detail-value mt-2 text-2xl font-semibold text-slate-900">
                         {caseItem.pet_name || '—'}
                       </div>
                     </div>
                     <div>
-                      <div className="text-sm font-medium uppercase tracking-wide text-slate-500">
+                      <div className="pickup-print-detail-label text-sm font-medium uppercase tracking-wide text-slate-500">
                         Owner Name
                       </div>
-                      <div className="mt-2 text-2xl font-semibold text-slate-900">
+                      <div className="pickup-print-detail-value mt-2 text-2xl font-semibold text-slate-900">
                         {caseItem.owner_name || '—'}
                       </div>
                     </div>
                     <div>
-                      <div className="text-sm font-medium uppercase tracking-wide text-slate-500">
+                      <div className="pickup-print-detail-label text-sm font-medium uppercase tracking-wide text-slate-500">
                         Clinic
                       </div>
-                      <div className="mt-2 text-xl font-semibold text-slate-900">
+                      <div className="pickup-print-detail-value pickup-print-detail-value--secondary mt-2 text-xl font-semibold text-slate-900">
                         {caseItem.clinic_name || 'Unknown Clinic'}
                       </div>
                     </div>
                     <div>
-                      <div className="text-sm font-medium uppercase tracking-wide text-slate-500">
+                      <div className="pickup-print-detail-label text-sm font-medium uppercase tracking-wide text-slate-500">
                         Intake Date
                       </div>
-                      <div className="mt-2 text-xl font-semibold text-slate-900">
+                      <div className="pickup-print-detail-value pickup-print-detail-value--secondary mt-2 text-xl font-semibold text-slate-900">
                         {formatPickupDate(caseItem.created_at)}
                       </div>
                     </div>
                   </div>
 
-                  <div className="mt-10 grid gap-6 md:grid-cols-2">
-                    <div className="rounded-2xl border border-slate-200 p-5 text-center">
-                      <div className="text-sm font-medium uppercase tracking-wide text-slate-500">
+                  <div className="pickup-print-codes mt-10 grid gap-6 md:grid-cols-2">
+                    <div className="pickup-print-code-card rounded-2xl border border-slate-200 p-5 text-center">
+                      <div className="pickup-print-code-label text-sm font-medium uppercase tracking-wide text-slate-500">
                         Case Scan
                       </div>
                       <img
                         src={`https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(caseQrPayload)}`}
                         alt={`Case QR for ${caseItem.case_number || 'case'}`}
-                        className="mx-auto mt-4 h-[120px] w-[120px]"
+                        className="pickup-print-code-image mx-auto mt-4 h-[120px] w-[120px]"
                       />
-                      <div className="mt-3 break-all text-xs text-slate-500">
+                      <div className="pickup-print-code-text mt-3 break-all text-xs text-slate-500">
                         {caseQrPayload}
                       </div>
                     </div>
-
-                    <div className="rounded-2xl border border-slate-200 p-5 text-center">
-                      <div className="text-sm font-medium uppercase tracking-wide text-slate-500">
-                        Clinic Verification
-                      </div>
-                      {clinicQrPayload ? (
-                        <>
-                          <img
-                            src={`https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(clinicQrPayload)}`}
-                            alt={`Clinic verification QR for ${clinicName}`}
-                            className="mx-auto mt-4 h-[120px] w-[120px]"
-                          />
-                          <div className="mt-3 break-all text-xs text-slate-500">
-                            {clinicQrPayload}
-                          </div>
-                        </>
-                      ) : (
-                        <div className="mt-6 text-sm text-slate-600">
-                          No clinic verification code configured
-                        </div>
-                      )}
-                    </div>
                   </div>
 
-                  <div className="mt-10 rounded-2xl border border-dashed border-slate-300 p-6">
-                    <div className="text-sm font-medium uppercase tracking-wide text-slate-500">
+                  <div className="pickup-print-notes mt-10 rounded-2xl border border-dashed border-slate-300 p-6">
+                    <div className="pickup-print-notes-label text-sm font-medium uppercase tracking-wide text-slate-500">
                       Manual Verification Notes
                     </div>
-                    <div className="mt-4 space-y-4 text-base text-slate-700">
+                    <div className="pickup-print-notes-body mt-4 space-y-4 text-base text-slate-700">
                       <p>Verify case number, pet name, clinic, and owner details before transport.</p>
-                      <div className="h-20 rounded-xl border border-slate-200" />
-                      <div className="h-20 rounded-xl border border-slate-200" />
+                      <div className="pickup-print-note-line h-20 rounded-xl border border-slate-200" />
+                      <div className="pickup-print-note-line h-20 rounded-xl border border-slate-200" />
                     </div>
                   </div>
                 </div>
@@ -449,22 +401,205 @@ export default async function PickupPage() {
           )}
         </div>
 
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `
-              (() => {
-                const button = document.getElementById('print-pickup-sheets');
-                if (!button || button.dataset.printBound === 'true') {
-                  return;
-                }
-                button.dataset.printBound = 'true';
-                button.addEventListener('click', () => {
-                  window.print();
-                });
-              })();
-            `,
-          }}
-        />
+      <Script id="pickup-print-handler" strategy="afterInteractive">
+        {`
+          (() => {
+            const button = document.getElementById('print-pickup-sheets');
+            if (!button || button.dataset.printBound === 'true') {
+                return;
+            }
+            button.dataset.printBound = 'true';
+            button.addEventListener('click', () => {
+              const source = document.querySelector('.pickup-print-sheets');
+              if (!source) {
+                return;
+              }
+              const sourceMarkup = source.outerHTML;
+
+              const popup = window.open('', '_blank', 'width=1024,height=768');
+              if (!popup) {
+                return;
+              }
+
+              popup.document.open();
+              popup.document.write(\`
+                <!doctype html>
+                <html>
+                  <head>
+                    <meta charset="utf-8" />
+                    <meta name="viewport" content="width=device-width, initial-scale=1" />
+                    <title>Pickup Sheets</title>
+                    <style>
+                      @page {
+                        margin: 0.35in;
+                      }
+
+                      html, body {
+                        margin: 0;
+                        padding: 0;
+                        background: #fff;
+                        color: #0f172a;
+                        font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+                      }
+
+                      .pickup-print-sheet {
+                        break-inside: avoid;
+                        page-break-inside: avoid;
+                        min-height: 0;
+                        padding: 12px;
+                      }
+
+                      .pickup-print-sheet + .pickup-print-sheet {
+                        break-before: page;
+                        page-break-before: always;
+                      }
+
+                      .pickup-print-card {
+                        max-width: 100%;
+                        border: 1px solid #cbd5e1;
+                        border-radius: 16px;
+                        padding: 20px;
+                        box-sizing: border-box;
+                      }
+
+                      .pickup-print-header {
+                        border-bottom: 1px solid #cbd5e1;
+                        padding-bottom: 12px;
+                      }
+
+                      .pickup-print-eyebrow {
+                        font-size: 11px;
+                        font-weight: 600;
+                        letter-spacing: 0.2em;
+                        text-transform: uppercase;
+                        color: #64748b;
+                      }
+
+                      .pickup-print-title {
+                        margin-top: 6px;
+                        font-size: 28px;
+                        line-height: 1.1;
+                        font-weight: 700;
+                        color: #0f172a;
+                      }
+
+                      .pickup-print-subtitle {
+                        margin-top: 6px;
+                        font-size: 16px;
+                        line-height: 1.25;
+                        color: #334155;
+                      }
+
+                      .pickup-print-details {
+                        margin-top: 24px;
+                        display: grid;
+                        grid-template-columns: repeat(2, minmax(0, 1fr));
+                        gap: 16px;
+                      }
+
+                      .pickup-print-detail-label {
+                        font-size: 11px;
+                        font-weight: 500;
+                        letter-spacing: 0.08em;
+                        text-transform: uppercase;
+                        color: #64748b;
+                      }
+
+                      .pickup-print-detail-value {
+                        margin-top: 4px;
+                        font-size: 20px;
+                        line-height: 1.15;
+                        font-weight: 600;
+                        color: #0f172a;
+                      }
+
+                      .pickup-print-detail-value--secondary {
+                        font-size: 17px;
+                      }
+
+                      .pickup-print-codes {
+                        margin-top: 24px;
+                        display: grid;
+                        grid-template-columns: repeat(2, minmax(0, 1fr));
+                        gap: 16px;
+                      }
+
+                      .pickup-print-code-card {
+                        border: 1px solid #e2e8f0;
+                        border-radius: 16px;
+                        padding: 16px;
+                        text-align: center;
+                      }
+
+                      .pickup-print-code-label {
+                        font-size: 11px;
+                        font-weight: 500;
+                        letter-spacing: 0.08em;
+                        text-transform: uppercase;
+                        color: #64748b;
+                      }
+
+                      .pickup-print-code-image {
+                        display: block;
+                        margin: 12px auto 0;
+                        height: 104px;
+                        width: 104px;
+                      }
+
+                      .pickup-print-code-text {
+                        margin-top: 8px;
+                        font-size: 10px;
+                        line-height: 1.25;
+                        color: #64748b;
+                        word-break: break-all;
+                      }
+
+                      .pickup-print-notes {
+                        margin-top: 24px;
+                        border: 1px dashed #cbd5e1;
+                        border-radius: 16px;
+                        padding: 16px;
+                      }
+
+                      .pickup-print-notes-label {
+                        font-size: 11px;
+                        font-weight: 500;
+                        letter-spacing: 0.08em;
+                        text-transform: uppercase;
+                        color: #64748b;
+                      }
+
+                      .pickup-print-notes-body {
+                        margin-top: 12px;
+                        font-size: 14px;
+                        line-height: 1.3;
+                        color: #334155;
+                      }
+
+                      .pickup-print-note-line {
+                        height: 56px;
+                        margin-top: 12px;
+                        border: 1px solid #e2e8f0;
+                        border-radius: 12px;
+                      }
+                    </style>
+                  </head>
+                  <body>
+                    \${sourceMarkup}
+                  </body>
+                </html>
+              \`);
+              popup.document.close();
+
+              popup.addEventListener('load', () => {
+                popup.focus();
+                popup.print();
+                popup.close();
+              });
+            });
+          })();
+        `}
+      </Script>
     </div>
   )
 }

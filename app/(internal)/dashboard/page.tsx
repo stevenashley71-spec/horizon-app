@@ -36,6 +36,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   let query = supabase
     .from('cases')
     .select('id, case_number, pet_name, owner_name, clinic_name, status, created_at')
+    .is('archived_at', null)
     .not('status', 'in', '("completed","cancelled")')
     .order('created_at', { ascending: false })
 

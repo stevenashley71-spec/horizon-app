@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
 
-import { validateClinicExitPin } from '@/app/actions/validate-clinic-exit-pin'
+import { validateClinicExitPinForClinic } from '@/app/actions/validate-clinic-exit-pin'
 import { getUserRole } from '@/lib/auth/get-user-role'
 import { createServiceRoleSupabase } from '@/lib/supabase/server'
 
@@ -95,7 +95,9 @@ export default async function ClinicSubmittedCasePage({
 
     const enteredPin = String(formData.get('exit_pin') ?? '')
     const target = String(formData.get('target') ?? '')
-    const isValid = await validateClinicExitPin(enteredPin)
+    const isValid = typedCaseItem.clinic_id
+      ? await validateClinicExitPinForClinic(typedCaseItem.clinic_id, enteredPin)
+      : false
 
     if (isValid) {
       if (target === 'cases') {

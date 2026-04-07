@@ -73,6 +73,12 @@ async function requireTemporaryAdminAccess() {
   }
 }
 
+export async function deleteClinicAdmin(): Promise<never> {
+  await requireTemporaryAdminAccess()
+
+  throw new Error('Clinic deletion is not allowed. Use deactivate instead.')
+}
+
 export async function saveClinicAdmin(formData: FormData) {
   await requireTemporaryAdminAccess()
 
@@ -93,6 +99,7 @@ export async function saveClinicAdmin(formData: FormData) {
   const zip = String(formData.get('zip') ?? '').trim() || null
   const phone = String(formData.get('phone') ?? '').trim() || null
   const email = String(formData.get('email') ?? '').trim() || null
+  const allowsDonationIntake = String(formData.get('allows_donation_intake') ?? '') === 'true'
   const password = String(formData.get('password') ?? '')
   const logoAltText = String(formData.get('logo_alt_text') ?? '').trim() || null
   const removeLogo = String(formData.get('remove_logo') ?? '') === 'true'
@@ -182,6 +189,7 @@ export async function saveClinicAdmin(formData: FormData) {
     zip,
     phone,
     email,
+    allows_donation_intake: allowsDonationIntake,
     logo_alt_text: logoAltText,
     updated_at: new Date().toISOString(),
   }
@@ -302,6 +310,48 @@ export async function setClinicActive(clinicId: string, isActive: boolean): Prom
 
   if (error) {
     throw new Error(error.message)
+  }
+
+  revalidatePath('/admin/clinics')
+}
+
+export async function archiveClinicAdmin(clinicId: string): Promise<void> {
+  await requireTemporaryAdminAccess()
+
+  const normalizedClinicId = clinicId.trim()
+
+  if (!normalizedClinicId) {
+    throw new Error('Clinic is required')
+  }
+
+  const supabase = createServiceRoleSupabase()
+
+  const { data: existingClinic, error: existingClinicError } = await supabase
+    .from('clinics')
+    .select('id, archived_at')
+    .eq('id', normalizedClinicId)
+    .maybeSingle()
+
+  if (existingClinicError) {
+    throw new Error(existingClinicError.message)
+  }
+
+  if (!existingClinic) {
+    throw new Error('Clinic not found')
+  }
+
+  if (!existingClinic.archived_at) {
+    const { error } = await supabase
+      .from('clinics')
+      .update({
+        archived_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', normalizedClinicId)
+
+    if (error) {
+      throw new Error(error.message)
+    }
   }
 
   revalidatePath('/admin/clinics')

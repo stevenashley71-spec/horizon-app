@@ -60,18 +60,35 @@ type LoadedIntakeDraftWithCatalog = LoadedIntakeDraft & {
   catalog: ClinicIntakeCatalog
 }
 
-export async function loadIntakeDraft(draftId?: string): Promise<LoadedIntakeDraftWithCatalog> {
-  const userRole = await getUserRole()
-  const clinicResult = await getClinicContextResult()
+export type LoadIntakeDraftOptions = {
+  clinicContextOverride?: {
+    clinicId: string
+  }
+}
 
-  if (!userRole || !clinicResult || clinicResult.kind !== 'ok') {
+export async function loadIntakeDraft(
+  draftId?: string,
+  options?: LoadIntakeDraftOptions
+): Promise<LoadedIntakeDraftWithCatalog> {
+  const clinicContextOverride = options?.clinicContextOverride
+  const allowFreshOverrideWithoutAuth = Boolean(clinicContextOverride && !draftId)
+  const userRole = allowFreshOverrideWithoutAuth ? null : await getUserRole()
+  const clinicResult = allowFreshOverrideWithoutAuth ? null : await getClinicContextResult()
+
+  if (!allowFreshOverrideWithoutAuth && (!userRole || !clinicResult || clinicResult.kind !== 'ok')) {
     throw new Error('Authentication required')
   }
+
+  const clinicIdForDraft =
+    clinicContextOverride?.clinicId?.trim() ||
+    (clinicResult && clinicResult.kind === 'ok' ? clinicResult.clinic.clinicId : null)
 
   let catalog: ClinicIntakeCatalog
 
   try {
-    catalog = await loadClinicIntakeCatalog()
+    catalog = await loadClinicIntakeCatalog({
+      clinicContextOverride,
+    })
   } catch (error) {
     if (
       process.env.NODE_ENV !== 'production' &&
@@ -91,6 +108,17 @@ export async function loadIntakeDraft(draftId?: string): Promise<LoadedIntakeDra
         premiumUrns: [],
         soulBursts: [],
         addOns: [],
+        pricing: {
+          profile: {
+            scope: 'clinic',
+            sourceClinicId: null,
+            sourceClinicCode: null,
+          },
+          cremationPricing: [],
+          productPricing: [],
+          resolvedAt: new Date(0).toISOString(),
+          resolverVersion: 'fallback-dev',
+        },
       }
     } else {
       throw error
@@ -123,7 +151,7 @@ export async function loadIntakeDraft(draftId?: string): Promise<LoadedIntakeDra
       'id, status, intake_source, pet_snapshot, owner_snapshot, service_snapshot, product_snapshot, pricing_snapshot, signature_snapshot, validation_snapshot, created_at, updated_at'
     )
     .eq('id', draftId)
-    .eq('clinic_id', clinicResult.clinic.clinicId)
+    .eq('clinic_id', clinicIdForDraft)
     .single()
 
   if (error || !data) {

@@ -125,6 +125,16 @@ export default async function ProductsAdminPage({
     )
   }
 
+  const categorySections = Array.from(
+    productItems.reduce((sections, product) => {
+      const existingItems = sections.get(product.category) ?? []
+      existingItems.push(product)
+      sections.set(product.category, existingItems)
+      return sections
+    }, new Map<string, typeof productItems>())
+  )
+  const productManagementSections = categorySections
+
   return (
     <AdminSectionShell>
         <section className="rounded-[28px] bg-white p-8 shadow-sm">
@@ -138,7 +148,19 @@ export default async function ProductsAdminPage({
           </div>
         </section>
 
-        <ProductForm />
+        <details className="rounded-[24px] border border-slate-200 bg-white shadow-sm">
+          <summary className="cursor-pointer list-none px-6 py-5">
+            <div>
+              <h2 className="text-2xl font-semibold text-slate-900">Create Product</h2>
+              <p className="mt-1 text-sm text-slate-500">
+                Open to add a new product to the catalog.
+              </p>
+            </div>
+          </summary>
+          <div className="border-t border-slate-200 p-6">
+            <ProductForm />
+          </div>
+        </details>
 
         <section className="space-y-6">
           <div>
@@ -154,29 +176,73 @@ export default async function ProductsAdminPage({
             </div>
           ) : (
             <div className="space-y-6">
-              {productItems.map((product) => (
-                <div key={product.id} className="space-y-4">
-                  <div className="flex justify-end">
-                    <form
-                      action={async () => {
-                        'use server'
-                        await setProductActive(product.id, !product.is_active)
-                      }}
-                    >
-                      <button
-                        type="submit"
-                        className={`rounded-lg px-4 py-2 font-medium ${
-                          product.is_active
-                            ? 'bg-slate-200 text-slate-900 hover:bg-slate-300'
-                            : 'bg-emerald-900 text-white hover:bg-emerald-800'
-                        }`}
-                      >
-                        {product.is_active ? 'Deactivate Product' : 'Activate Product'}
-                      </button>
-                    </form>
+              {productManagementSections.map(([category, items]) => (
+                <section
+                  key={category}
+                  className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm"
+                >
+                  <div className="mb-4">
+                    <h3 className="text-2xl font-semibold text-slate-900">{category}</h3>
+                    <p className="mt-1 text-sm text-slate-500">
+                      {items.length} product{items.length === 1 ? '' : 's'}
+                    </p>
                   </div>
-                  <ProductForm product={product} />
-                </div>
+
+                  <div className="space-y-3">
+                    {items.map((product) => (
+                      <details
+                        key={product.id}
+                        className="overflow-hidden rounded-[22px] border border-slate-200 bg-slate-50"
+                      >
+                        <summary className="cursor-pointer list-none px-5 py-4">
+                          <div className="flex flex-wrap items-center justify-between gap-4">
+                            <div>
+                              <p className="text-lg font-semibold text-slate-900">{product.name}</p>
+                              <p className="mt-1 text-sm text-slate-500">{product.category}</p>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-3">
+                              <span className="text-sm font-medium text-slate-700">
+                                {formatCurrency(product.base_price)}
+                              </span>
+                              <span
+                                className={`rounded-full px-3 py-1 text-sm font-medium ${
+                                  product.is_active
+                                    ? 'bg-emerald-100 text-emerald-800'
+                                    : 'bg-slate-200 text-slate-700'
+                                }`}
+                              >
+                                {product.is_active ? 'Active' : 'Inactive'}
+                              </span>
+                            </div>
+                          </div>
+                        </summary>
+
+                        <div className="border-t border-slate-200 p-5">
+                          <div className="mb-4 flex justify-end">
+                            <form
+                              action={async () => {
+                                'use server'
+                                await setProductActive(product.id, !product.is_active)
+                              }}
+                            >
+                              <button
+                                type="submit"
+                                className={`rounded-lg px-4 py-2 font-medium ${
+                                  product.is_active
+                                    ? 'bg-slate-200 text-slate-900 hover:bg-slate-300'
+                                    : 'bg-emerald-900 text-white hover:bg-emerald-800'
+                                }`}
+                              >
+                                {product.is_active ? 'Deactivate Product' : 'Activate Product'}
+                              </button>
+                            </form>
+                          </div>
+                          <ProductForm product={product} />
+                        </div>
+                      </details>
+                    ))}
+                  </div>
+                </section>
               ))}
             </div>
           )}
@@ -237,93 +303,105 @@ export default async function ProductsAdminPage({
                   <p className="text-slate-600">No products exist yet.</p>
                 </div>
               ) : (
-                <div className="overflow-x-auto">
-                  <table className="min-w-full border-collapse">
-                    <thead className="bg-slate-50">
-                      <tr className="text-left">
-                        <th className="px-6 py-4 text-sm font-semibold text-slate-600">Product</th>
-                        <th className="px-6 py-4 text-sm font-semibold text-slate-600">Category</th>
-                        <th className="px-6 py-4 text-sm font-semibold text-slate-600">Base Price</th>
-                        <th className="px-6 py-4 text-sm font-semibold text-slate-600">Global</th>
-                        <th className="px-6 py-4 text-sm font-semibold text-slate-600">Clinic</th>
-                        <th className="px-6 py-4 text-sm font-semibold text-slate-600">Price Override</th>
-                        <th className="px-6 py-4 text-sm font-semibold text-slate-600">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {productItems.map((product) => {
-                        const override = clinicProductOverrides.get(product.id)
-                        const effectiveIsActive = override ? override.is_active : product.is_active
+                <div className="divide-y divide-slate-200">
+                  {categorySections.map(([category, items]) => (
+                    <div key={category} className="px-6 py-5">
+                      <div className="mb-4">
+                        <h4 className="text-xl font-semibold text-slate-900">{category}</h4>
+                        <p className="mt-1 text-sm text-slate-500">
+                          {items.length} product{items.length === 1 ? '' : 's'}
+                        </p>
+                      </div>
+                      <div className="overflow-x-auto">
+                        <table className="min-w-full border-collapse">
+                          <thead className="bg-slate-50">
+                            <tr className="text-left">
+                              <th className="px-6 py-4 text-sm font-semibold text-slate-600">Product</th>
+                              <th className="px-6 py-4 text-sm font-semibold text-slate-600">Category</th>
+                              <th className="px-6 py-4 text-sm font-semibold text-slate-600">Base Price</th>
+                              <th className="px-6 py-4 text-sm font-semibold text-slate-600">Global</th>
+                              <th className="px-6 py-4 text-sm font-semibold text-slate-600">Clinic</th>
+                              <th className="px-6 py-4 text-sm font-semibold text-slate-600">Price Override</th>
+                              <th className="px-6 py-4 text-sm font-semibold text-slate-600">Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {items.map((product) => {
+                              const override = clinicProductOverrides.get(product.id)
+                              const effectiveIsActive = override ? override.is_active : product.is_active
 
-                        return (
-                          <tr key={product.id} className="border-t border-slate-200 align-top">
-                            <td className="px-6 py-4 text-sm font-semibold text-slate-900">
-                              {product.name}
-                            </td>
-                            <td className="px-6 py-4 text-sm text-slate-700">{product.category}</td>
-                            <td className="px-6 py-4 text-sm text-slate-700">
-                              {formatCurrency(product.base_price)}
-                            </td>
-                            <td className="px-6 py-4 text-sm">
-                              <span
-                                className={`rounded-full px-3 py-1 font-medium ${
-                                  product.is_active
-                                    ? 'bg-emerald-100 text-emerald-800'
-                                    : 'bg-slate-200 text-slate-700'
-                                }`}
-                              >
-                                {product.is_active ? 'Active' : 'Inactive'}
-                              </span>
-                            </td>
-                            <td className="px-6 py-4 text-sm">
-                              <span
-                                className={`rounded-full px-3 py-1 font-medium ${
-                                  effectiveIsActive
-                                    ? 'bg-emerald-100 text-emerald-800'
-                                    : 'bg-rose-100 text-rose-800'
-                                }`}
-                              >
-                                {effectiveIsActive ? 'Available' : 'Unavailable'}
-                              </span>
-                            </td>
-                            <td className="px-6 py-4 text-sm text-slate-700">
-                              <form action={saveClinicProductAvailability} className="flex items-center gap-3">
-                                <input type="hidden" name="clinic_id" value={selectedClinicId} />
-                                <input type="hidden" name="product_id" value={product.id} />
-                                <input
-                                  type="hidden"
-                                  name="is_active"
-                                  value={effectiveIsActive ? 'false' : 'true'}
-                                />
-                                <input
-                                  name="price_override"
-                                  type="number"
-                                  step="0.01"
-                                  min="0"
-                                  defaultValue={override?.price_override ?? ''}
-                                  placeholder="Optional"
-                                  className="w-28 rounded-lg border border-slate-200 bg-white px-3 py-2 text-slate-900"
-                                />
-                                <button
-                                  type="submit"
-                                  className={`rounded-lg px-4 py-2 font-medium ${
-                                    effectiveIsActive
-                                      ? 'bg-rose-100 text-rose-800 hover:bg-rose-200'
-                                      : 'bg-emerald-900 text-white hover:bg-emerald-800'
-                                  }`}
-                                >
-                                  {effectiveIsActive ? 'Turn Off' : 'Turn On'}
-                                </button>
-                              </form>
-                            </td>
-                            <td className="px-6 py-4 text-sm text-slate-500">
-                              {override ? 'Clinic override saved' : 'Using global default'}
-                            </td>
-                          </tr>
-                        )
-                      })}
-                    </tbody>
-                  </table>
+                              return (
+                                <tr key={product.id} className="border-t border-slate-200 align-top">
+                                  <td className="px-6 py-4 text-sm font-semibold text-slate-900">
+                                    {product.name}
+                                  </td>
+                                  <td className="px-6 py-4 text-sm text-slate-700">{product.category}</td>
+                                  <td className="px-6 py-4 text-sm text-slate-700">
+                                    {formatCurrency(product.base_price)}
+                                  </td>
+                                  <td className="px-6 py-4 text-sm">
+                                    <span
+                                      className={`rounded-full px-3 py-1 font-medium ${
+                                        product.is_active
+                                          ? 'bg-emerald-100 text-emerald-800'
+                                          : 'bg-slate-200 text-slate-700'
+                                      }`}
+                                    >
+                                      {product.is_active ? 'Active' : 'Inactive'}
+                                    </span>
+                                  </td>
+                                  <td className="px-6 py-4 text-sm">
+                                    <span
+                                      className={`rounded-full px-3 py-1 font-medium ${
+                                        effectiveIsActive
+                                          ? 'bg-emerald-100 text-emerald-800'
+                                          : 'bg-rose-100 text-rose-800'
+                                      }`}
+                                    >
+                                      {effectiveIsActive ? 'Available' : 'Unavailable'}
+                                    </span>
+                                  </td>
+                                  <td className="px-6 py-4 text-sm text-slate-700">
+                                    <form action={saveClinicProductAvailability} className="flex items-center gap-3">
+                                      <input type="hidden" name="clinic_id" value={selectedClinicId} />
+                                      <input type="hidden" name="product_id" value={product.id} />
+                                      <input
+                                        type="hidden"
+                                        name="is_active"
+                                        value={effectiveIsActive ? 'false' : 'true'}
+                                      />
+                                      <input
+                                        name="price_override"
+                                        type="number"
+                                        step="0.01"
+                                        min="0"
+                                        defaultValue={override?.price_override ?? ''}
+                                        placeholder="Optional"
+                                        className="w-28 rounded-lg border border-slate-200 bg-white px-3 py-2 text-slate-900"
+                                      />
+                                      <button
+                                        type="submit"
+                                        className={`rounded-lg px-4 py-2 font-medium ${
+                                          effectiveIsActive
+                                            ? 'bg-rose-100 text-rose-800 hover:bg-rose-200'
+                                            : 'bg-emerald-900 text-white hover:bg-emerald-800'
+                                        }`}
+                                      >
+                                        {effectiveIsActive ? 'Turn Off' : 'Turn On'}
+                                      </button>
+                                    </form>
+                                  </td>
+                                  <td className="px-6 py-4 text-sm text-slate-500">
+                                    {override ? 'Clinic override saved' : 'Using global default'}
+                                  </td>
+                                </tr>
+                              )
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               )}
             </section>

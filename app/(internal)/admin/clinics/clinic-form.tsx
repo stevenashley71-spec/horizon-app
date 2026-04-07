@@ -23,6 +23,7 @@ type ClinicFormProps = {
     logo_path: string | null
     logo_alt_text: string | null
     logo_url: string | null
+    allows_donation_intake: boolean
     is_active: boolean
   }
 }
@@ -262,6 +263,18 @@ export function ClinicForm({ clinic }: ClinicFormProps) {
             defaultValue={clinic?.email ?? ''}
             className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-slate-900"
           />
+        </div>
+        <div className="md:col-span-2">
+          <label className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900">
+            <input
+              name="allows_donation_intake"
+              type="checkbox"
+              value="true"
+              defaultChecked={clinic?.allows_donation_intake ?? false}
+              className="h-4 w-4 rounded border-slate-300"
+            />
+            <span className="text-sm font-medium">Allow Donation Intake</span>
+          </label>
         </div>
       </div>
 

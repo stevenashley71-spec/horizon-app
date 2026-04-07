@@ -38,6 +38,7 @@ export default async function ClinicPage() {
     .from('cases')
     .select('id, case_number, pet_name, owner_name, status, created_at')
     .eq('clinic_id', userRole.clinicId)
+    .is('archived_at', null)
     .not('status', 'in', '("completed","cancelled")')
     .order('created_at', { ascending: false })
 

@@ -519,6 +519,7 @@ export default async function WorkroomPage() {
     .select(
       'id, case_number, status, created_at, clinic_name, pet_name, cremation_type, memorial_items, pet_weight, pet_weight_unit, pet_weight_lbs'
     )
+    .is('archived_at', null)
     .neq('status', 'cancelled')
     .order('created_at', { ascending: true })
 

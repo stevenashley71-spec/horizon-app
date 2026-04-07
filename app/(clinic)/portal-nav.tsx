@@ -36,6 +36,7 @@ export function ClinicPortalNav() {
   const pathname = usePathname()
   const isSubmittedScreen = pathname.startsWith('/clinic/submitted/')
   const submittedCaseId = pathname.split('/')[3] ?? ''
+  const isClinicNewScreen = pathname === '/clinic/new'
   const logoutClassName =
     'rounded-full bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-60'
 
@@ -44,12 +45,15 @@ export function ClinicPortalNav() {
       {CLINIC_NAV_ITEMS.map((item) => {
         const isActive = isActiveClinicRoute(pathname, item.href)
         const navHref = item.href
-        const shouldIntercept = isSubmittedScreen
-        const finalHref = shouldIntercept
+        const finalHref = isSubmittedScreen
           ? item.href === '/cases'
             ? `/clinic/submitted/${submittedCaseId}?pin=1&target=cases`
             : `/clinic/submitted/${submittedCaseId}?pin=1&target=dashboard`
-          : navHref
+          : isClinicNewScreen
+            ? item.href === '/cases'
+              ? '/clinic/new?pin=1&target=cases'
+              : '/clinic/new?pin=1&target=dashboard'
+            : navHref
 
         return (
           <Link
@@ -68,6 +72,13 @@ export function ClinicPortalNav() {
       {isSubmittedScreen ? (
         <Link
           href={`/clinic/submitted/${submittedCaseId}?pin=1&target=dashboard`}
+          className={logoutClassName}
+        >
+          Logout
+        </Link>
+      ) : isClinicNewScreen ? (
+        <Link
+          href="/clinic/new?pin=1&target=logout"
           className={logoutClassName}
         >
           Logout

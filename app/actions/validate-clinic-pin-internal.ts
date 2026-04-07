@@ -1,25 +1,19 @@
 'use server'
 
 import { getUserRole } from '@/lib/auth/get-user-role'
-import { getClinicContextResult } from '@/lib/clinic-auth'
 import { createServiceRoleSupabase } from '@/lib/supabase/server'
 
 type ClinicPinRow = {
   exit_pin: string | null
 }
 
-export async function validateClinicExitPinForClinic(
+export async function validateClinicPinInternal(
   clinicId: string,
   pin: string
 ): Promise<boolean> {
   const userRole = await getUserRole()
-  const clinicResult = await getClinicContextResult()
 
-  if (!userRole || !clinicResult || clinicResult.kind !== 'ok') {
-    return false
-  }
-
-  if (userRole.role !== 'clinic_user') {
+  if (!userRole || (userRole.role !== 'admin' && userRole.role !== 'horizon_staff')) {
     return false
   }
 
@@ -27,10 +21,6 @@ export async function validateClinicExitPinForClinic(
   const normalizedPin = pin.trim()
 
   if (!normalizedClinicId || !normalizedPin) {
-    return false
-  }
-
-  if (clinicResult.clinic.clinicId !== normalizedClinicId) {
     return false
   }
 
@@ -52,14 +42,4 @@ export async function validateClinicExitPinForClinic(
   }
 
   return normalizedPin === expectedPin
-}
-
-export async function validateClinicExitPin(pin: string): Promise<boolean> {
-  const clinicResult = await getClinicContextResult()
-
-  if (!clinicResult || clinicResult.kind !== 'ok') {
-    return false
-  }
-
-  return validateClinicExitPinForClinic(clinicResult.clinic.clinicId, pin)
 }

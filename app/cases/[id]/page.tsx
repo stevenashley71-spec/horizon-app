@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
 
+import { archiveCaseAdmin } from '@/app/actions/archive-case-admin'
 import { ClinicAccessBlocked } from '@/app/components/clinic-access-blocked'
 import { ClinicPortalFrame } from '@/app/components/clinic-portal-frame'
 import { InternalPortalFrame } from '@/app/components/internal-portal-frame'
@@ -22,6 +23,7 @@ type CaseItem = {
   clinic_id: string | null
   case_number: string | null
   created_at: string | null
+  archived_at: string | null
   status: string | null
   clinic_name: string | null
   pet_name: string | null
@@ -129,6 +131,7 @@ export default async function CaseDetailPage({
   }
 
   const isInternalUser = userRole.role === 'admin' || userRole.role === 'horizon_staff'
+  const isAdminUser = userRole.role === 'admin'
   let clinicContext:
     | {
         clinicName: string
@@ -160,7 +163,7 @@ export default async function CaseDetailPage({
   const { data: caseItem, error: caseError } = await supabase
     .from('cases')
     .select(
-      'id, clinic_id, case_number, created_at, status, clinic_name, pet_name, pet_species, pet_weight, pet_weight_unit, pet_weight_lbs, pet_breed, pet_color, owner_name, owner_phone, owner_email, owner_address, owner_city, owner_state, owner_zip, cremation_type, selected_urn, additional_urns, soulburst_items, memorial_items, subtotal, total'
+      'id, clinic_id, case_number, created_at, archived_at, status, clinic_name, pet_name, pet_species, pet_weight, pet_weight_unit, pet_weight_lbs, pet_breed, pet_color, owner_name, owner_phone, owner_email, owner_address, owner_city, owner_state, owner_zip, cremation_type, selected_urn, additional_urns, soulburst_items, memorial_items, subtotal, total'
     )
     .eq(caseLookupField, id)
     .single()
@@ -181,6 +184,10 @@ export default async function CaseDetailPage({
   const typedCaseItem = caseItem as CaseItem
 
   if (!isInternalUser && typedCaseItem.clinic_id !== userRole.clinicId) {
+    notFound()
+  }
+
+  if (!isInternalUser && typedCaseItem.archived_at) {
     notFound()
   }
 
@@ -215,14 +222,41 @@ export default async function CaseDetailPage({
 
   const caseContent = (
     <div className="space-y-8">
-      <div className="flex items-center justify-between">
-        <Link
-          id="case-detail-back-link"
-          href="/cases"
-          className="rounded-lg bg-slate-200 px-4 py-2 text-slate-900 hover:bg-slate-300"
-        >
-          Back to Cases
-        </Link>
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <Link
+            id="case-detail-back-link"
+            href="/cases"
+            className="rounded-lg bg-slate-200 px-4 py-2 text-slate-900 hover:bg-slate-300"
+          >
+            Back to Cases
+          </Link>
+          {isInternalUser ? (
+            <Link
+              href="/pickup"
+              className="rounded-lg bg-slate-900 px-4 py-2 font-medium text-white hover:bg-slate-800"
+            >
+              Print Pickup Sheets
+            </Link>
+          ) : null}
+        </div>
+        {isAdminUser ? (
+          <form
+            action={async (formData: FormData) => {
+              'use server'
+              await archiveCaseAdmin(formData)
+            }}
+          >
+            <input type="hidden" name="case_id" value={typedCaseItem.id} />
+            <button
+              type="submit"
+              disabled={Boolean(typedCaseItem.archived_at)}
+              className="rounded-lg bg-rose-100 px-4 py-2 font-medium text-rose-800 hover:bg-rose-200 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500"
+            >
+              {typedCaseItem.archived_at ? 'Archived' : 'Archive Case'}
+            </button>
+          </form>
+        ) : null}
       </div>
 
       <section className="rounded-[28px] bg-white p-8 shadow-sm">

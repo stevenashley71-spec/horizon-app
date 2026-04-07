@@ -19,12 +19,25 @@ import type {
   ClinicResolvedService,
 } from '@/lib/intake/types'
 
+type LoadClinicIntakeCatalogOptions = {
+  clinicContextOverride?: {
+    clinicId: string
+  }
+}
+
+type LoadClinicIntakeCatalogResult = Omit<ClinicIntakeCatalog, 'clinic'> & {
+  clinic: ClinicIntakeCatalog['clinic'] & {
+    allows_donation_intake: boolean
+  }
+}
+
 type ClinicRow = {
   id: string
   name: string
   code: string | null
   logo_path: string | null
   logo_alt_text: string | null
+  allows_donation_intake: boolean
   is_active: boolean
 }
 
@@ -49,6 +62,7 @@ type ClinicProductRow = {
   price_override: number | null
   horizon_invoice_price_override: number | null
   included_in_cremation: boolean | null
+  included_in_employee_pet: boolean | null
 }
 
 type OverrideMapValue = {
@@ -56,6 +70,7 @@ type OverrideMapValue = {
   price_override: number | null
   horizon_invoice_price_override: number | null
   included_in_cremation: boolean | null
+  included_in_employee_pet: boolean | null
 }
 
 type ResolvedProductRow = {
@@ -71,6 +86,7 @@ type ResolvedProductRow = {
   effectiveBasePrice: number
   effectiveHorizonInvoicePrice: number | null
   includedInCremation: boolean
+  includedInEmployeePet: boolean
   pricingSource: ClinicIntakeResolvedPricingSource
 }
 
@@ -78,6 +94,7 @@ type CremationPricingRow = {
   id: string
   clinic_id: string | null
   cremation_type: 'private' | 'general'
+  intake_type: string
   weight_min_lbs: number | null
   weight_max_lbs: number | null
   client_price: number | null
@@ -120,7 +137,29 @@ async function getImageUrl(imagePath: string | null) {
   return data.publicUrl
 }
 
-async function mapResolvedProduct(product: NormalizedResolvedProduct): Promise<ClinicResolvedProduct> {
+async function mapResolvedProduct(
+  product: NormalizedResolvedProduct & {
+    includedInCremation?: boolean | null
+    included_in_cremation?: boolean | null
+    includedInEmployeePet?: boolean | null
+    included_in_employee_pet?: boolean | null
+  }
+): Promise<ClinicResolvedProduct> {
+  const includedInCremation =
+    product.included_in_cremation !== null && product.included_in_cremation !== undefined
+      ? product.included_in_cremation
+      : product.includedInCremation !== null && product.includedInCremation !== undefined
+        ? product.includedInCremation
+        : product.category === 'memorial'
+          ? product.included_by_default
+          : false
+  const includedInEmployeePet =
+    product.included_in_employee_pet !== null && product.included_in_employee_pet !== undefined
+      ? product.included_in_employee_pet
+      : product.includedInEmployeePet !== null && product.includedInEmployeePet !== undefined
+        ? product.includedInEmployeePet
+        : false
+
   return {
     productId: product.productId,
     sku: null,
@@ -131,28 +170,50 @@ async function mapResolvedProduct(product: NormalizedResolvedProduct): Promise<C
     imageUrl: await getImageUrl(product.image_path),
     imageAlt: product.image_alt_text,
     isIncludedByDefault: product.included_by_default,
+    includedInCremation,
     sortOrder: product.sort_order,
-    metadata: {},
+    metadata: {
+      includedInEmployeePet,
+    } as unknown as ClinicResolvedProduct['metadata'],
   }
 }
 
-export async function loadClinicIntakeCatalog(): Promise<ClinicIntakeCatalog> {
-  const clinicResult = await getClinicContextResult()
+export async function loadClinicIntakeCatalog(
+  options?: LoadClinicIntakeCatalogOptions
+): Promise<LoadClinicIntakeCatalogResult> {
+  const clinicContextOverride = options?.clinicContextOverride
+  let clinicContext = clinicContextOverride
+    ? {
+        clinicId: clinicContextOverride.clinicId.trim(),
+      }
+    : null
 
-  if (!clinicResult) {
-    throw new Error('Authentication required')
+  if (clinicContextOverride && !clinicContext?.clinicId) {
+    throw new Error('Clinic context override requires a clinicId')
   }
 
-  if (clinicResult.kind === 'blocked') {
-    throw new Error('Clinic access blocked')
+  if (!clinicContext) {
+    const clinicResult = await getClinicContextResult()
+
+    if (!clinicResult) {
+      throw new Error('Authentication required')
+    }
+
+    if (clinicResult.kind === 'blocked') {
+      throw new Error('Clinic access blocked')
+    }
+
+    clinicContext = {
+      clinicId: clinicResult.clinic.clinicId,
+    }
   }
 
   const supabase = createServiceRoleSupabase()
 
   const { data: clinic, error: clinicError } = await supabase
     .from('clinics')
-    .select('id, name, code, logo_path, logo_alt_text, is_active')
-    .eq('id', clinicResult.clinic.clinicId)
+    .select('id, name, code, logo_path, logo_alt_text, allows_donation_intake, is_active')
+    .eq('id', clinicContext.clinicId)
     .maybeSingle()
 
   if (clinicError) {
@@ -179,7 +240,9 @@ export async function loadClinicIntakeCatalog(): Promise<ClinicIntakeCatalog> {
     .order('name', { ascending: true })
 
   if (productsError) {
-    throw new Error('Failed to load products')
+    throw new Error(
+      `Failed to load products: ${productsError.message} (code: ${productsError.code ?? 'unknown'}, details: ${productsError.details ?? 'none'}, hint: ${productsError.hint ?? 'none'})`
+    )
   }
 
   const typedProducts: ProductRow[] = (products ?? []) as ProductRow[]
@@ -187,12 +250,14 @@ export async function loadClinicIntakeCatalog(): Promise<ClinicIntakeCatalog> {
   const { data: clinicProducts, error: clinicProductsError } = await supabase
     .from('clinic_products')
     .select(
-      'clinic_id, product_id, is_active, price_override, horizon_invoice_price_override, included_in_cremation'
+      'clinic_id, product_id, is_active, price_override, horizon_invoice_price_override, included_in_cremation, included_in_employee_pet'
     )
-    .eq('clinic_id', clinicResult.clinic.clinicId)
+    .eq('clinic_id', clinicContext.clinicId)
 
   if (clinicProductsError) {
-    throw new Error('Failed to load clinic product overrides')
+    throw new Error(
+      `Failed to load clinic product overrides: ${clinicProductsError.message} (code: ${clinicProductsError.code ?? 'unknown'}, details: ${clinicProductsError.details ?? 'none'}, hint: ${clinicProductsError.hint ?? 'none'})`
+    )
   }
 
   const typedClinicProducts: ClinicProductRow[] = (clinicProducts ?? []) as ClinicProductRow[]
@@ -205,6 +270,7 @@ export async function loadClinicIntakeCatalog(): Promise<ClinicIntakeCatalog> {
         price_override: clinicProduct.price_override,
         horizon_invoice_price_override: clinicProduct.horizon_invoice_price_override,
         included_in_cremation: clinicProduct.included_in_cremation,
+        included_in_employee_pet: clinicProduct.included_in_employee_pet,
       },
     ])
   )
@@ -240,6 +306,10 @@ export async function loadClinicIntakeCatalog(): Promise<ClinicIntakeCatalog> {
         : normalizedCategory === 'memorial'
           ? product.included_by_default
           : false
+    const includedInEmployeePet =
+      override?.included_in_employee_pet !== null && override?.included_in_employee_pet !== undefined
+        ? override.included_in_employee_pet
+        : false
 
     return {
       productId: product.id,
@@ -254,6 +324,7 @@ export async function loadClinicIntakeCatalog(): Promise<ClinicIntakeCatalog> {
       effectiveBasePrice,
       effectiveHorizonInvoicePrice,
       includedInCremation,
+      includedInEmployeePet,
       pricingSource: getResolvedPricingSource(override?.price_override ?? null),
     }
   }).filter((product): product is ResolvedProductRow => product !== null)
@@ -305,14 +376,16 @@ export async function loadClinicIntakeCatalog(): Promise<ClinicIntakeCatalog> {
   const { data: cremationPricingRows, error: cremationPricingError } = await supabase
     .from('cremation_pricing')
     .select(
-      'id, clinic_id, cremation_type, weight_min_lbs, weight_max_lbs, client_price, horizon_invoice_price, is_active, sort_order'
+      'id, clinic_id, cremation_type, intake_type, weight_min_lbs, weight_max_lbs, client_price, horizon_invoice_price, is_active, sort_order'
     )
-    .eq('clinic_id', clinicResult.clinic.clinicId)
+    .eq('clinic_id', clinicContext.clinicId)
     .order('sort_order', { ascending: true })
     .order('cremation_type', { ascending: true })
 
   if (cremationPricingError) {
-    throw new Error('Failed to load cremation pricing')
+    throw new Error(
+      `Failed to load cremation pricing: ${cremationPricingError.message} (code: ${cremationPricingError.code ?? 'unknown'}, details: ${cremationPricingError.details ?? 'none'}, hint: ${cremationPricingError.hint ?? 'none'})`
+    )
   }
 
   const typedCremationPricingRows: CremationPricingRow[] =
@@ -339,6 +412,7 @@ export async function loadClinicIntakeCatalog(): Promise<ClinicIntakeCatalog> {
           currency: 'USD',
           metadata: {
             clinicId: row.clinic_id,
+            intakeType: row.intake_type,
             sortOrder: row.sort_order,
           },
         }))
@@ -384,7 +458,8 @@ export async function loadClinicIntakeCatalog(): Promise<ClinicIntakeCatalog> {
       currency: 'USD',
       metadata: {
         isIncludedByDefault: product.included_by_default,
-      },
+        includedInEmployeePet: product.includedInEmployeePet,
+      } as ClinicIntakeResolvedProductPricingRow['metadata'],
     })
   )
   const pricing: ClinicIntakeResolvedPricing = {
@@ -406,6 +481,7 @@ export async function loadClinicIntakeCatalog(): Promise<ClinicIntakeCatalog> {
       code: typedClinic.code,
       logoUrl: typedClinic.logo_path,
       logoAlt: typedClinic.logo_alt_text,
+      allows_donation_intake: typedClinic.allows_donation_intake,
     },
     services,
     memorialItems: resolvedMemorialItems,
