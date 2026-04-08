@@ -100,17 +100,19 @@ export default async function WorkflowAdminPage() {
     )
   }
 
+  const currentWorkflow = activeWorkflow
+
   const [{ data: workflowSteps, error: workflowStepsError }, { data: workflowDependencies, error: workflowDependenciesError }] =
     await Promise.all([
       supabase
         .from('workflow_steps')
         .select('id, workflow_definition_id, sort_order, code, name, required, case_event_type, target_case_status')
-        .eq('workflow_definition_id', activeWorkflow.id)
+        .eq('workflow_definition_id', currentWorkflow.id)
         .order('sort_order', { ascending: true }),
       supabase
         .from('workflow_step_dependencies')
         .select('step_id, depends_on_step_id')
-        .eq('workflow_definition_id', activeWorkflow.id),
+        .eq('workflow_definition_id', currentWorkflow.id),
     ])
 
   if (workflowStepsError) {
@@ -168,7 +170,7 @@ export default async function WorkflowAdminPage() {
       .from('workflow_steps')
       .select('id, workflow_definition_id, sort_order')
       .in('id', [stepId, adjacentStepId])
-      .eq('workflow_definition_id', activeWorkflow.id)
+      .eq('workflow_definition_id', currentWorkflow.id)
 
     if (stepsToSwapError) {
       throw new Error(stepsToSwapError.message)
@@ -192,7 +194,7 @@ export default async function WorkflowAdminPage() {
       .from('workflow_steps')
       .update({ sort_order: temporarySortOrder })
       .eq('id', currentStep.id)
-      .eq('workflow_definition_id', activeWorkflow.id)
+      .eq('workflow_definition_id', currentWorkflow.id)
 
     if (moveCurrentToTemporaryError) {
       throw new Error(moveCurrentToTemporaryError.message)
@@ -202,7 +204,7 @@ export default async function WorkflowAdminPage() {
       .from('workflow_steps')
       .update({ sort_order: currentStep.sort_order })
       .eq('id', adjacentStep.id)
-      .eq('workflow_definition_id', activeWorkflow.id)
+      .eq('workflow_definition_id', currentWorkflow.id)
 
     if (moveAdjacentError) {
       throw new Error(moveAdjacentError.message)
@@ -212,7 +214,7 @@ export default async function WorkflowAdminPage() {
       .from('workflow_steps')
       .update({ sort_order: adjacentStep.sort_order })
       .eq('id', currentStep.id)
-      .eq('workflow_definition_id', activeWorkflow.id)
+      .eq('workflow_definition_id', currentWorkflow.id)
 
     if (moveCurrentIntoPlaceError) {
       throw new Error(moveCurrentIntoPlaceError.message)
@@ -247,7 +249,7 @@ export default async function WorkflowAdminPage() {
     const { data: existingStep, error: existingStepError } = await actionSupabase
       .from('workflow_steps')
       .select('id')
-      .eq('workflow_definition_id', activeWorkflow.id)
+      .eq('workflow_definition_id', currentWorkflow.id)
       .eq('code', code)
       .maybeSingle()
 
@@ -262,7 +264,7 @@ export default async function WorkflowAdminPage() {
     const { data: maxSortOrderRow, error: maxSortOrderError } = await actionSupabase
       .from('workflow_steps')
       .select('sort_order')
-      .eq('workflow_definition_id', activeWorkflow.id)
+      .eq('workflow_definition_id', currentWorkflow.id)
       .order('sort_order', { ascending: false })
       .limit(1)
       .maybeSingle()
@@ -277,7 +279,7 @@ export default async function WorkflowAdminPage() {
     const { error: insertStepError } = await actionSupabase
       .from('workflow_steps')
       .insert({
-        workflow_definition_id: activeWorkflow.id,
+        workflow_definition_id: currentWorkflow.id,
         name,
         code,
         case_event_type: caseEventTypeValue || null,
@@ -310,7 +312,7 @@ export default async function WorkflowAdminPage() {
       .from('workflow_steps')
       .select('id, workflow_definition_id, sort_order')
       .eq('id', stepId)
-      .eq('workflow_definition_id', activeWorkflow.id)
+      .eq('workflow_definition_id', currentWorkflow.id)
       .maybeSingle()
 
     if (currentStepError) {
@@ -342,7 +344,7 @@ export default async function WorkflowAdminPage() {
     const { error: deleteDependenciesError } = await actionSupabase
       .from('workflow_step_dependencies')
       .delete()
-      .eq('workflow_definition_id', activeWorkflow.id)
+      .eq('workflow_definition_id', currentWorkflow.id)
       .eq('step_id', currentStep.id)
 
     if (deleteDependenciesError) {
@@ -354,7 +356,7 @@ export default async function WorkflowAdminPage() {
         .from('workflow_step_dependencies')
         .insert(
           uniqueDependencyIds.map((dependencyStepId) => ({
-            workflow_definition_id: activeWorkflow.id,
+            workflow_definition_id: currentWorkflow.id,
             step_id: currentStep.id,
             depends_on_step_id: dependencyStepId,
             dependency_type: 'completion',
@@ -386,7 +388,7 @@ export default async function WorkflowAdminPage() {
       .from('workflow_steps')
       .select('id')
       .eq('id', stepId)
-      .eq('workflow_definition_id', activeWorkflow.id)
+      .eq('workflow_definition_id', currentWorkflow.id)
       .maybeSingle()
 
     if (currentStepError) {
@@ -472,7 +474,7 @@ export default async function WorkflowAdminPage() {
         required: requiredValue === 'true',
       })
       .eq('id', stepId)
-      .eq('workflow_definition_id', activeWorkflow.id)
+      .eq('workflow_definition_id', currentWorkflow.id)
 
     if (updateRequiredError) {
       throw new Error(updateRequiredError.message)
@@ -505,19 +507,19 @@ export default async function WorkflowAdminPage() {
         <div className="mt-6 grid gap-4 md:grid-cols-4">
           <div>
             <div className="text-sm font-medium text-slate-500">Workflow Name</div>
-            <div className="mt-1 text-lg font-semibold text-slate-900">{activeWorkflow.name}</div>
+            <div className="mt-1 text-lg font-semibold text-slate-900">{currentWorkflow.name}</div>
           </div>
           <div>
             <div className="text-sm font-medium text-slate-500">Workflow Code</div>
-            <div className="mt-1 text-lg font-semibold text-slate-900">{activeWorkflow.code}</div>
+            <div className="mt-1 text-lg font-semibold text-slate-900">{currentWorkflow.code}</div>
           </div>
           <div>
             <div className="text-sm font-medium text-slate-500">Version</div>
-            <div className="mt-1 text-lg font-semibold text-slate-900">{activeWorkflow.version}</div>
+            <div className="mt-1 text-lg font-semibold text-slate-900">{currentWorkflow.version}</div>
           </div>
           <div>
             <div className="text-sm font-medium text-slate-500">Status</div>
-            <div className="mt-1 text-lg font-semibold text-slate-900">{activeWorkflow.status}</div>
+            <div className="mt-1 text-lg font-semibold text-slate-900">{currentWorkflow.status}</div>
           </div>
         </div>
       </section>
