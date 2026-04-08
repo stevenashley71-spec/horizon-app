@@ -73,6 +73,12 @@ type WorkflowStepScanRequirementRow = {
   required: boolean
 }
 
+type CaseWorkflowOverrideRow = {
+  case_id: string
+  target_step_code: string
+  created_at: string
+}
+
 type NormalizedStep = WorkflowStepRow & {
   completionEventType: string
   completionScanCode: string | null
@@ -324,17 +330,40 @@ export async function resolveWorkflow(
   )
 
   const allowedStepIds = new Set(allowedSteps.map((step) => step.id))
+  const { data: workflowOverrides, error: workflowOverrideError } = await supabase
+    .from('case_workflow_overrides')
+    .select('case_id, target_step_code, created_at')
+    .eq('case_id', input.caseId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+
+  if (workflowOverrideError) {
+    throw new Error('Unable to load case workflow overrides')
+  }
+
+  const latestWorkflowOverride = (workflowOverrides?.[0] ?? null) as CaseWorkflowOverrideRow | null
+  const overrideTargetStep = latestWorkflowOverride
+    ? allowedSteps.find((step) => step.code === latestWorkflowOverride.target_step_code) ?? null
+    : null
   const completedEventTypes = new Set(
     sortEventsAscending(input.events)
       .map((event) => normalizeEventType(event.event_type))
       .filter(Boolean)
   )
-
+  const completedAllowedStepIds = overrideTargetStep
+    ? new Set(
+        allowedSteps
+          .filter((step) => step.sort_order < overrideTargetStep.sort_order)
+          .map((step) => step.id)
+      )
+    : new Set(
+        allowedSteps
+          .filter((step) => completedEventTypes.has(step.completionEventType))
+          .map((step) => step.id)
+      )
   const completedAllowedSteps = allowedSteps.filter((step) =>
-    completedEventTypes.has(step.completionEventType)
+    completedAllowedStepIds.has(step.id)
   )
-
-  const completedAllowedStepIds = new Set(completedAllowedSteps.map((step) => step.id))
   const currentStep = completedAllowedSteps[completedAllowedSteps.length - 1]?.code ?? null
 
   const remainingAllowedSteps = allowedSteps.filter((step) => !completedAllowedStepIds.has(step.id))

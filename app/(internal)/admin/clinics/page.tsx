@@ -95,22 +95,41 @@ export default async function ClinicsAdminPage() {
   )
 
   const clinicItems = await Promise.all(
-    ((clinics as ClinicRow[] | null) ?? []).map(async (clinic) => ({
-      ...clinic,
-      logo_url: await getLogoUrl(clinic.logo_path),
-      pickup_qr: clinic.pickup_verification_code
-        ? await QRCode.toDataURL(clinic.pickup_verification_code)
-        : null,
-      delivery_qr: clinic.delivery_verification_code
-        ? await QRCode.toDataURL(clinic.delivery_verification_code)
-        : null,
-      linked_users: clinicUserItems
-        .filter((clinicUser) => clinicUser.clinic_id === clinic.id)
-        .map((clinicUser) => ({
-          user_id: clinicUser.user_id,
-          email: userEmailMap.get(clinicUser.user_id) ?? null,
-        })),
-    }))
+    ((clinics as ClinicRow[] | null) ?? []).map(async (clinic) => {
+      const pickup_print_payload =
+        clinic.id && clinic.pickup_verification_code
+          ? `HPC_CLINIC_PICKUP:${clinic.id}:${clinic.pickup_verification_code}`
+          : null
+      const delivery_print_payload =
+        clinic.id && clinic.delivery_verification_code
+          ? `HPC_CLINIC_DELIVERY:${clinic.id}:${clinic.delivery_verification_code}`
+          : null
+
+      return {
+        ...clinic,
+        logo_url: await getLogoUrl(clinic.logo_path),
+        pickup_qr: clinic.pickup_verification_code
+          ? await QRCode.toDataURL(clinic.pickup_verification_code)
+          : null,
+        delivery_qr: clinic.delivery_verification_code
+          ? await QRCode.toDataURL(clinic.delivery_verification_code)
+          : null,
+        pickup_print_payload,
+        delivery_print_payload,
+        pickup_print_qr: pickup_print_payload
+          ? await QRCode.toDataURL(pickup_print_payload)
+          : null,
+        delivery_print_qr: delivery_print_payload
+          ? await QRCode.toDataURL(delivery_print_payload)
+          : null,
+        linked_users: clinicUserItems
+          .filter((clinicUser) => clinicUser.clinic_id === clinic.id)
+          .map((clinicUser) => ({
+            user_id: clinicUser.user_id,
+            email: userEmailMap.get(clinicUser.user_id) ?? null,
+          })),
+      }
+    })
   )
 
   return (
