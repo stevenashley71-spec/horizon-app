@@ -1,5 +1,6 @@
 import 'server-only'
 
+import { getMappedStatusForCaseEvent, isCaseEventType } from '@/lib/case-events'
 import { createServiceRoleSupabase } from '@/lib/supabase/server'
 
 export type ResolveWorkflowInput = {
@@ -15,6 +16,7 @@ export type ResolveWorkflowResult = {
   currentStep: string | null
   nextStep: string | null
   nextStepCompletionCode: string | null
+  derivedCaseStatus: string | null
   isComplete: boolean
   isAtInitialStep: boolean
   allowedNextSteps: string[]
@@ -62,7 +64,11 @@ type WorkflowStepDependencyRow = {
 
 type WorkflowStepRuleRow = {
   workflow_step_id: string
-  rule_type: 'cremation_type_in' | 'intake_status_equals' | 'case_status_equals'
+  rule_type:
+    | 'cremation_type_in'
+    | 'intake_status_equals'
+    | 'case_status_equals'
+    | 'memorial_name_contains'
   operator: 'equals' | 'in'
   value_json: unknown
 }
@@ -88,6 +94,17 @@ type NormalizedStep = WorkflowStepRow & {
   meta: InternalWorkflowStepMeta
 }
 
+type LoadAllowedWorkflowStepsParams = {
+  supabase: ReturnType<typeof createServiceRoleSupabase>
+  cremationType: ResolveWorkflowInput['cremationType']
+}
+
+type CaseMemorialItem = {
+  product_id?: string
+  name?: string
+  price_cents?: number
+}
+
 function normalizeEventType(value: string | null | undefined) {
   return typeof value === 'string' ? value.trim() : ''
 }
@@ -98,6 +115,23 @@ function parseStringArray(value: unknown): string[] {
   }
 
   return value.filter((item): item is string => typeof item === 'string')
+}
+
+function parseCaseMemorialItems(value: unknown): CaseMemorialItem[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  return value.filter((item): item is CaseMemorialItem => typeof item === 'object' && item !== null)
+}
+
+function getMemorialNameMatchValue(value: unknown) {
+  if (!value || typeof value !== 'object') {
+    return ''
+  }
+
+  const match = (value as { match?: unknown }).match
+  return typeof match === 'string' ? match.trim().toLowerCase() : ''
 }
 
 function stepAllowsCremationType(
@@ -158,6 +192,42 @@ function dependenciesSatisfied(
   })
 }
 
+function getDerivedCaseStatusForStep(step: NormalizedStep | null) {
+  if (!step) {
+    return null
+  }
+
+  const explicitTargetStatus = typeof step.target_case_status === 'string'
+    ? step.target_case_status.trim()
+    : ''
+
+  if (explicitTargetStatus) {
+    return explicitTargetStatus
+  }
+
+  if (step.case_event_type && isCaseEventType(step.case_event_type)) {
+    return getMappedStatusForCaseEvent(step.case_event_type) ?? null
+  }
+
+  if (step.code === 'case_created' || step.meta.isInitial) {
+    return 'new'
+  }
+
+  return null
+}
+
+function getDerivedCaseStatusForResolvedWorkflow(params: {
+  currentCompletedStep: NormalizedStep | null
+  nextStep: NormalizedStep | null
+  hasOverride: boolean
+}) {
+  if (params.hasOverride && params.nextStep) {
+    return getDerivedCaseStatusForStep(params.nextStep)
+  }
+
+  return getDerivedCaseStatusForStep(params.currentCompletedStep)
+}
+
 function buildInternalWorkflowStepMeta(
   steps: WorkflowStepRow[],
   dependencyMap: Map<string, string[]>
@@ -183,23 +253,10 @@ function buildInternalWorkflowStepMeta(
   )
 }
 
-export async function resolveWorkflow(
-  input: ResolveWorkflowInput
-): Promise<ResolveWorkflowResult> {
-  if (!input.caseId.trim()) {
-    return {
-      currentStep: null,
-      nextStep: null,
-      nextStepCompletionCode: null,
-      isComplete: false,
-      isAtInitialStep: false,
-      allowedNextSteps: [],
-      allowedNextStepDetails: [],
-    }
-  }
-
-  const supabase = createServiceRoleSupabase()
-
+async function loadAllowedWorkflowSteps({
+  supabase,
+  cremationType,
+}: LoadAllowedWorkflowStepsParams): Promise<NormalizedStep[]> {
   const { data: workflowDefinitions, error: workflowDefinitionError } = await supabase
     .from('workflow_definitions')
     .select('id, code, name, version, status')
@@ -215,15 +272,7 @@ export async function resolveWorkflow(
   const activeWorkflow = (workflowDefinitions?.[0] ?? null) as WorkflowDefinitionRow | null
 
   if (!activeWorkflow) {
-    return {
-      currentStep: null,
-      nextStep: null,
-      nextStepCompletionCode: null,
-      isComplete: false,
-      isAtInitialStep: false,
-      allowedNextSteps: [],
-      allowedNextStepDetails: [],
-    }
+    return []
   }
 
   const [
@@ -325,8 +374,80 @@ export async function resolveWorkflow(
     },
   }))
 
-  const allowedSteps = normalizedSteps.filter((step) =>
-    stepAllowsCremationType(step, input.cremationType)
+  return normalizedSteps
+    .filter((step) => step.required === true)
+    .filter((step) => stepAllowsCremationType(step, cremationType))
+}
+
+function stepMatchesConditionalRules(step: Pick<NormalizedStep, 'cremationTypeRules'>, memorialItems: CaseMemorialItem[]) {
+  const memorialRules = step.cremationTypeRules.filter(
+    (rule) => rule.rule_type === 'memorial_name_contains'
+  )
+
+  if (memorialRules.length === 0) {
+    return true
+  }
+
+  const memorialNames = memorialItems
+    .map((item) => (typeof item.name === 'string' ? item.name.trim().toLowerCase() : ''))
+    .filter(Boolean)
+
+  return memorialRules.every((rule) => {
+    const match = getMemorialNameMatchValue(rule.value_json)
+
+    if (!match) {
+      return true
+    }
+
+    return memorialNames.some((name) => name.includes(match))
+  })
+}
+
+export async function getWorkflowSupportedStepCodes(
+  cremationType: ResolveWorkflowInput['cremationType']
+): Promise<string[]> {
+  const supabase = createServiceRoleSupabase()
+  const allowedSteps = await loadAllowedWorkflowSteps({ supabase, cremationType })
+
+  return allowedSteps.map((step) => step.code)
+}
+
+export async function resolveWorkflow(
+  input: ResolveWorkflowInput
+): Promise<ResolveWorkflowResult> {
+  if (!input.caseId.trim()) {
+    return {
+      currentStep: null,
+      nextStep: null,
+      nextStepCompletionCode: null,
+      derivedCaseStatus: null,
+      isComplete: false,
+      isAtInitialStep: false,
+      allowedNextSteps: [],
+      allowedNextStepDetails: [],
+    }
+  }
+
+  const supabase = createServiceRoleSupabase()
+  const [unfilteredAllowedSteps, caseMemorialItemsResult] = await Promise.all([
+    loadAllowedWorkflowSteps({
+      supabase,
+      cremationType: input.cremationType,
+    }),
+    supabase
+      .from('cases')
+      .select('memorial_items')
+      .eq('id', input.caseId)
+      .maybeSingle(),
+  ])
+
+  if (caseMemorialItemsResult.error) {
+    throw new Error('Unable to load case memorial items')
+  }
+
+  const memorialItems = parseCaseMemorialItems(caseMemorialItemsResult.data?.memorial_items)
+  const allowedSteps = unfilteredAllowedSteps.filter((step) =>
+    stepMatchesConditionalRules(step, memorialItems)
   )
 
   const allowedStepIds = new Set(allowedSteps.map((step) => step.id))
@@ -353,7 +474,10 @@ export async function resolveWorkflow(
   const completedAllowedStepIds = overrideTargetStep
     ? new Set(
         allowedSteps
-          .filter((step) => step.sort_order < overrideTargetStep.sort_order)
+          .filter(
+            (step) =>
+              step.sort_order < overrideTargetStep.sort_order || step.id === overrideTargetStep.id
+          )
           .map((step) => step.id)
       )
     : new Set(
@@ -364,7 +488,8 @@ export async function resolveWorkflow(
   const completedAllowedSteps = allowedSteps.filter((step) =>
     completedAllowedStepIds.has(step.id)
   )
-  const currentStep = completedAllowedSteps[completedAllowedSteps.length - 1]?.code ?? null
+  const currentCompletedStep = completedAllowedSteps[completedAllowedSteps.length - 1] ?? null
+  const currentStep = currentCompletedStep?.code ?? null
 
   const remainingAllowedSteps = allowedSteps.filter((step) => !completedAllowedStepIds.has(step.id))
 
@@ -378,13 +503,18 @@ export async function resolveWorkflow(
   const allowedNextSteps = allowedNextStepDetails.map((step) => step.code)
 
   const nextStep = allowedNextSteps[0] ?? null
+  const nextAllowedStep = remainingAllowedSteps.find(
+    (step) =>
+      step.code === nextStep &&
+      dependenciesSatisfied(step, completedAllowedStepIds, allowedStepIds)
+  ) ?? null
   // Resolver-owned scan-code contract so consumers do not derive completion codes from step names.
-  const nextStepCompletionCode =
-    remainingAllowedSteps.find(
-      (step) =>
-        step.code === nextStep &&
-        dependenciesSatisfied(step, completedAllowedStepIds, allowedStepIds)
-    )?.completionScanCode ?? null
+  const nextStepCompletionCode = nextAllowedStep?.completionScanCode ?? null
+  const derivedCaseStatus = getDerivedCaseStatusForResolvedWorkflow({
+    currentCompletedStep,
+    nextStep: nextAllowedStep,
+    hasOverride: Boolean(overrideTargetStep),
+  })
   const isComplete = remainingAllowedSteps.length === 0
   // Resolver-owned replacement for consumers that previously hardcoded an initial step name.
   // This answers whether the case is currently sitting at an initial workflow step, which for
@@ -397,6 +527,7 @@ export async function resolveWorkflow(
     currentStep,
     nextStep,
     nextStepCompletionCode,
+    derivedCaseStatus,
     isComplete,
     isAtInitialStep,
     allowedNextSteps,

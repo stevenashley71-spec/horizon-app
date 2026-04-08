@@ -3,6 +3,7 @@ import { notFound, redirect } from 'next/navigation'
 import Script from 'next/script'
 
 import { archiveCaseAdmin } from '@/app/actions/archive-case-admin'
+import { setCaseWorkflowOverride } from '@/app/actions/set-case-workflow-override'
 import { ClinicAccessBlocked } from '@/app/components/clinic-access-blocked'
 import { ClinicPortalFrame } from '@/app/components/clinic-portal-frame'
 import { InternalPortalFrame } from '@/app/components/internal-portal-frame'
@@ -12,7 +13,7 @@ import { getAllowedNextStatuses, formatCaseStatus } from '@/lib/case-status'
 import { getClinicContextResult } from '@/lib/clinic-auth'
 import { resolveCaseDisplayStatus } from '@/lib/resolve-case-display-status'
 import { createServiceRoleSupabase } from '@/lib/supabase/server'
-import { resolveWorkflow } from '@/lib/workflow/resolve-workflow'
+import { getWorkflowSupportedStepCodes, resolveWorkflow } from '@/lib/workflow/resolve-workflow'
 
 import { CaseEventForm } from './event-form'
 import { StatusUpdateForm } from './status-update-form'
@@ -55,6 +56,23 @@ type CaseEventItem = {
   event_type: string
   created_at: string
   created_by: string | null
+}
+
+type CaseWorkflowOverrideItem = {
+  id: string
+  target_step_code: string
+  reason: string
+  created_at: string
+  created_by: string | null
+}
+
+type ActivityLogItem = {
+  id: string
+  source: 'event' | 'override'
+  occurredAt: string
+  actorId: string | null
+  title: string
+  detail: string | null
 }
 
 function formatWeight(caseItem: {
@@ -128,10 +146,26 @@ function isUuidLike(value: string) {
   )
 }
 
+function getSingleSearchParam(
+  value: string | string[] | undefined
+) {
+  if (typeof value === 'string') {
+    return value
+  }
+
+  if (Array.isArray(value)) {
+    return value[0] ?? null
+  }
+
+  return null
+}
+
 export default async function CaseDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>
+  searchParams?: Promise<Record<string, string | string[] | undefined>>
 }) {
   const userRole = await getUserRole()
 
@@ -140,6 +174,7 @@ export default async function CaseDetailPage({
   }
 
   const { id } = await params
+  const resolvedSearchParams = (await searchParams) ?? {}
 
   if (!id || id.includes('[') || id.includes(']')) {
     notFound()
@@ -229,13 +264,54 @@ export default async function CaseDetailPage({
       created_at: event.created_at,
     })),
   })
+  const { data: currentOverrideData, error: currentOverrideError } = await supabase
+    .from('case_workflow_overrides')
+    .select('id, target_step_code, reason, created_at, created_by')
+    .eq('case_id', typedCaseItem.id)
+    .order('created_at', { ascending: false })
+
+  if (currentOverrideError) {
+    throw new Error('Unable to load case workflow override')
+  }
+
   const nextStep = workflow.nextStep
   const isComplete = workflow.isComplete
   const memorialItems = typedCaseItem.memorial_items ?? []
   const additionalUrns = typedCaseItem.additional_urns ?? []
   const soulburstItems = typedCaseItem.soulburst_items ?? []
+  const workflowOverrideHistory = (currentOverrideData as CaseWorkflowOverrideItem[] | null) ?? []
+  const currentWorkflowOverride = workflowOverrideHistory[0] ?? null
+  const workflowSupportedStepCodes = isAdminUser
+    ? await getWorkflowSupportedStepCodes(
+        typedCaseItem.cremation_type === 'general' ? 'general' : 'private'
+      )
+    : []
+  const overrideErrorMessage = getSingleSearchParam(resolvedSearchParams.override_error)
+  const overrideSuccess = getSingleSearchParam(resolvedSearchParams.override_status) === 'success'
   const showPrintPickupSheetButton = isAdminUser && nextStep === 'picked_up' && isComplete === false
   const caseQrPayload = `HPC_CASE:${typedCaseItem.case_number ?? ''}`
+  const mappedActivityEvents: ActivityLogItem[] = typedCaseEvents.map((event) => ({
+    id: event.id,
+    source: 'event',
+    occurredAt: event.created_at,
+    actorId: event.created_by ?? null,
+    title: formatCaseEventType(event.event_type),
+    detail: null,
+  }))
+  const mappedActivityOverrides: ActivityLogItem[] = workflowOverrideHistory.map((override) => ({
+    id: override.id,
+    source: 'override',
+    occurredAt: override.created_at,
+    actorId: override.created_by ?? null,
+    title: 'Workflow Override',
+    detail: `Target Step: ${override.target_step_code}${override.reason ? `; Reason: ${override.reason}` : ''}`,
+  }))
+  const activityLog: ActivityLogItem[] = [
+    ...mappedActivityEvents,
+    ...mappedActivityOverrides,
+  ].sort((a, b) => {
+    return new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime()
+  })
 
   const caseContent = (
     <div className="space-y-8">
@@ -340,6 +416,172 @@ export default async function CaseDetailPage({
             <p className="mt-3 text-base text-slate-600">
               No further workflow actions are available.
             </p>
+          )}
+          {isAdminUser ? (
+            <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-5">
+              {currentWorkflowOverride ? (
+                <div className="mb-5 rounded-2xl border border-slate-200 bg-white p-4">
+                  <h3 className="text-lg font-semibold text-slate-900">Current Override</h3>
+                  <div className="mt-4 grid gap-4 md:grid-cols-3">
+                    <div>
+                      <div className="text-sm font-medium text-slate-500">Target Step</div>
+                      <div className="mt-1 text-sm font-semibold text-slate-900">
+                        {currentWorkflowOverride.target_step_code}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-sm font-medium text-slate-500">Reason</div>
+                      <div className="mt-1 text-sm font-semibold text-slate-900">
+                        {currentWorkflowOverride.reason}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-sm font-medium text-slate-500">Applied At</div>
+                      <div className="mt-1 text-sm font-semibold text-slate-900">
+                        {new Date(currentWorkflowOverride.created_at).toLocaleString('en-US', {
+                          month: 'long',
+                          day: 'numeric',
+                          year: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+              <h3 className="text-lg font-semibold text-slate-900">Admin Override</h3>
+              <p className="mt-2 text-sm text-slate-500">
+                Manually reset the workflow cursor for correction or recovery.
+              </p>
+              <form
+                id="admin-workflow-override-form"
+                action={async (formData: FormData) => {
+                  'use server'
+
+                  const targetStepCode = String(formData.get('target_step_code') ?? '').trim()
+                  const reason = String(formData.get('reason') ?? '').trim()
+
+                  try {
+                    await setCaseWorkflowOverride(typedCaseItem.id, targetStepCode, reason)
+                    redirect(`/cases/${id}?override_status=success`)
+                  } catch (error) {
+                    const message =
+                      error instanceof Error ? error.message : 'Failed to set workflow override.'
+                    redirect(
+                      `/cases/${id}?override_error=${encodeURIComponent(message)}`
+                    )
+                  }
+                }}
+                className="mt-4 space-y-4"
+              >
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div>
+                    <label
+                      htmlFor="admin-override-target-step"
+                      className="text-sm font-medium text-slate-700"
+                    >
+                      Target Step
+                    </label>
+                    <select
+                      id="admin-override-target-step"
+                      name="target_step_code"
+                      defaultValue=""
+                      required
+                      className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-slate-900"
+                    >
+                      <option value="" disabled>
+                        Select a workflow step
+                      </option>
+                      {workflowSupportedStepCodes.map((stepCode) => (
+                        <option key={stepCode} value={stepCode}>
+                          {stepCode}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label
+                      htmlFor="admin-override-reason"
+                      className="text-sm font-medium text-slate-700"
+                    >
+                      Reason
+                    </label>
+                    <textarea
+                      id="admin-override-reason"
+                      name="reason"
+                      required
+                      rows={4}
+                      className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-slate-900"
+                      placeholder="Explain why this workflow override is needed"
+                    />
+                  </div>
+                </div>
+
+                {overrideErrorMessage ? (
+                  <p className="text-sm text-rose-700">{overrideErrorMessage}</p>
+                ) : null}
+                {overrideSuccess ? (
+                  <p className="text-sm text-emerald-700">Workflow override saved.</p>
+                ) : null}
+
+                <div className="flex flex-wrap gap-3">
+                  <button
+                    id="admin-workflow-override-submit"
+                    type="submit"
+                    className="rounded-lg bg-slate-900 px-4 py-2 font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    Save Override
+                  </button>
+                </div>
+              </form>
+            </div>
+          ) : null}
+        </section>
+      ) : null}
+
+      {isAdminUser ? (
+        <section className="rounded-[28px] bg-white p-8 shadow-sm">
+          <h2 className="text-2xl font-semibold text-slate-900">Override History</h2>
+          <p className="mt-3 text-sm text-slate-500">
+            Workflow overrides are shown newest first and remain separate from operational case events.
+          </p>
+
+          {workflowOverrideHistory.length === 0 ? (
+            <div className="mt-6 text-lg text-slate-600">No workflow overrides recorded.</div>
+          ) : (
+            <div className="mt-6 space-y-4">
+              {workflowOverrideHistory.map((override) => (
+                <div key={override.id} className="rounded-2xl border border-slate-200 p-5">
+                  <div className="grid gap-4 md:grid-cols-3">
+                    <div>
+                      <div className="text-sm font-medium text-slate-500">Target Step</div>
+                      <div className="mt-1 text-lg font-semibold text-slate-900">
+                        {override.target_step_code}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-sm font-medium text-slate-500">Reason</div>
+                      <div className="mt-1 text-lg font-semibold text-slate-900">
+                        {override.reason}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-sm font-medium text-slate-500">Applied At</div>
+                      <div className="mt-1 text-lg font-semibold text-slate-900">
+                        {new Date(override.created_at).toLocaleString('en-US', {
+                          month: 'long',
+                          day: 'numeric',
+                          year: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
           )}
         </section>
       ) : null}
@@ -557,6 +799,65 @@ export default async function CaseDetailPage({
                     <div className="text-sm font-medium text-slate-500">Created By</div>
                     <div className="mt-1 text-lg font-semibold text-slate-900">
                       {event.created_by || '—'}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section className="rounded-[28px] bg-white p-8 shadow-sm">
+        <h2 className="text-2xl font-semibold text-slate-900">Activity Log</h2>
+        <p className="mt-3 text-sm text-slate-500">
+          Operational events and workflow overrides shown in reverse chronological order.
+        </p>
+
+        {activityLog.length === 0 ? (
+          <div className="mt-6 text-lg text-slate-600">No activity recorded yet.</div>
+        ) : (
+          <div className="mt-6 space-y-4">
+            {activityLog.map((item) => (
+              <div key={`${item.source}-${item.id}`} className="rounded-2xl border border-slate-200 p-5">
+                <div className="grid gap-4 md:grid-cols-4">
+                  <div>
+                    <div className="text-sm font-medium text-slate-500">Activity</div>
+                    <div className="mt-1 text-lg font-semibold text-slate-900">{item.title}</div>
+                    <div className="mt-2">
+                      <span
+                        className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${
+                          item.source === 'override'
+                            ? 'bg-amber-100 text-amber-800'
+                            : 'bg-slate-100 text-slate-700'
+                        }`}
+                      >
+                        {item.source === 'override' ? 'Override' : 'Event'}
+                      </span>
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-sm font-medium text-slate-500">Occurred At</div>
+                    <div className="mt-1 text-lg font-semibold text-slate-900">
+                      {new Date(item.occurredAt).toLocaleString('en-US', {
+                        month: 'long',
+                        day: 'numeric',
+                        year: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-sm font-medium text-slate-500">Actor</div>
+                    <div className="mt-1 text-lg font-semibold text-slate-900">
+                      {item.actorId || '—'}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-sm font-medium text-slate-500">Detail</div>
+                    <div className="mt-1 text-lg font-semibold text-slate-900">
+                      {item.detail || '—'}
                     </div>
                   </div>
                 </div>
@@ -849,6 +1150,7 @@ export default async function CaseDetailPage({
           </Script>
         </>
       ) : null}
+
     </div>
   )
 

@@ -8,45 +8,17 @@ const storageKey = `sb-${supabaseHost}-auth-token`
 
 export async function createServerAuthSupabase() {
   const cookieStore = await cookies()
-  const mutableCookieStore = cookieStore as typeof cookieStore & {
-    set?: (
-      input:
-        | string
-        | {
-            name: string
-            value: string
-            path?: string
-            maxAge?: number
-          }
-    ) => void
-  }
 
   const cookieStorage = {
     getItem(key: string) {
       return cookieStore.get(key)?.value ?? null
     },
     setItem(key: string, value: string) {
-      if (!mutableCookieStore.set) {
-        return
-      }
-
-      mutableCookieStore.set({
-        name: key,
-        value,
-        path: '/',
-      })
+      void key
+      void value
     },
     removeItem(key: string) {
-      if (!mutableCookieStore.set) {
-        return
-      }
-
-      mutableCookieStore.set({
-        name: key,
-        value: '',
-        path: '/',
-        maxAge: 0,
-      })
+      void key
     },
   }
 

@@ -33,6 +33,14 @@ type CaseEventRow = {
   } | null
 }
 
+type CaseWorkflowOverrideRow = {
+  case_id: string
+  target_step_code: string
+  reason: string
+  created_at: string
+  created_by: string
+}
+
 type WorkroomCase = {
   id: string
   caseNumber: string
@@ -51,6 +59,8 @@ type WorkroomCase = {
   memorialItems: Array<{ item_id: string; item_name: string; qty: number }>
   terminalEventTime: string | null
   terminalEventUser: string | null
+  lastUpdatedSource: 'event' | 'override'
+  completionSource: 'event' | 'override' | null
 }
 
 type SummaryCard = {
@@ -151,32 +161,12 @@ function getCreatedAtTime(createdAt: string | null) {
   return createdAt ? new Date(createdAt).getTime() : Number.POSITIVE_INFINITY
 }
 
-function sortCasesByCreatedAt(a: WorkroomCase, b: WorkroomCase) {
-  return getCreatedAtTime(a.createdAt) - getCreatedAtTime(b.createdAt)
+function getTimestampTime(timestamp: string | null) {
+  return timestamp ? new Date(timestamp).getTime() : Number.NEGATIVE_INFINITY
 }
 
-async function findCompletionEvent(params: {
-  caseId: string
-  cremationType: 'private' | 'general'
-  caseEvents: CaseEventRow[]
-}) {
-  for (let index = 0; index < params.caseEvents.length; index += 1) {
-    const event = params.caseEvents[index]
-    const workflowAtEvent = await resolveWorkflow({
-      caseId: params.caseId,
-      cremationType: params.cremationType,
-      events: params.caseEvents.slice(0, index + 1).map((caseEvent) => ({
-        event_type: caseEvent.event_type,
-        created_at: caseEvent.created_at,
-      })),
-    })
-
-    if (workflowAtEvent.isComplete) {
-      return event
-    }
-  }
-
-  return null
+function sortCasesByCreatedAt(a: WorkroomCase, b: WorkroomCase) {
+  return getCreatedAtTime(a.createdAt) - getCreatedAtTime(b.createdAt)
 }
 
 function SummaryRow({ cards }: { cards: SummaryCard[] }) {
@@ -278,6 +268,9 @@ function PrivateBoardSection({ cases }: { cases: WorkroomCase[] }) {
                     <div className={`${metadataValueClass} ${oneLineMetadataClass}`}>
                       {caseItem.lastEventUser || 'Unassigned'}
                     </div>
+                    {caseItem.lastUpdatedSource === 'override' ? (
+                      <div className="mt-1 text-xs text-slate-500">Workflow override</div>
+                    ) : null}
                   </div>
                   <div className={columnCellClass}>
                     <div className={cardLabelClass}>Last Updated</div>
@@ -286,6 +279,9 @@ function PrivateBoardSection({ cases }: { cases: WorkroomCase[] }) {
                         ? new Date(caseItem.lastEventTime).toLocaleString()
                         : '—'}
                     </div>
+                    {caseItem.lastUpdatedSource === 'override' ? (
+                      <div className="mt-1 text-xs text-slate-500">Workflow override</div>
+                    ) : null}
                   </div>
                 </div>
               </div>
@@ -389,6 +385,9 @@ function GeneralBoardSection({
                     <div className={`${metadataValueClass} ${oneLineMetadataClass}`}>
                       {caseItem.lastEventUser || 'Unassigned'}
                     </div>
+                    {caseItem.lastUpdatedSource === 'override' ? (
+                      <div className="mt-1 text-xs text-slate-500">Workflow override</div>
+                    ) : null}
                   </div>
                   <div className={columnCellClass}>
                     <div className={cardLabelClass}>Last Updated</div>
@@ -397,6 +396,9 @@ function GeneralBoardSection({
                         ? new Date(caseItem.lastEventTime).toLocaleString()
                         : '—'}
                     </div>
+                    {caseItem.lastUpdatedSource === 'override' ? (
+                      <div className="mt-1 text-xs text-slate-500">Workflow override</div>
+                    ) : null}
                   </div>
                   <div className={columnCellClass}>
                     <div className={cardLabelClass}>Case Weight</div>
@@ -471,12 +473,18 @@ function RecentCompletedSection({
                       ? new Date(caseItem.terminalEventTime).toLocaleString()
                       : '—'}
                   </div>
+                  {caseItem.completionSource === 'override' ? (
+                    <div className="mt-1 text-xs text-slate-500">Workflow override</div>
+                  ) : null}
                 </div>
                 <div className={columnCellClass}>
                   <div className={cardLabelClass}>Completed By</div>
                   <div className={`${metadataValueClass} ${oneLineMetadataClass}`}>
                     {caseItem.terminalEventUser || 'Unassigned'}
                   </div>
+                  {caseItem.completionSource === 'override' ? (
+                    <div className="mt-1 text-xs text-slate-500">Workflow override</div>
+                  ) : null}
                 </div>
                 <div className={columnCellClass}>
                   <div className={cardLabelClass}>Cremation Type</div>
@@ -531,20 +539,34 @@ export default async function WorkroomPage() {
   const caseIds = caseItems.map((caseItem) => caseItem.id)
 
   let eventsByCaseId = new Map<string, CaseEventRow[]>()
+  let latestOverridesByCaseId = new Map<string, CaseWorkflowOverrideRow>()
   let userDisplayById = new Map<string, string>()
 
   if (caseIds.length > 0) {
-    const [{ data: caseEvents, error: caseEventsError }, usersResponse] = await Promise.all([
+    const [
+      { data: caseEvents, error: caseEventsError },
+      { data: caseWorkflowOverrides, error: caseWorkflowOverridesError },
+      usersResponse,
+    ] = await Promise.all([
       supabase
         .from('case_events')
         .select('case_id, event_type, created_at, created_by, metadata')
         .in('case_id', caseIds)
         .order('created_at', { ascending: true }),
+      supabase
+        .from('case_workflow_overrides')
+        .select('case_id, target_step_code, reason, created_at, created_by')
+        .in('case_id', caseIds)
+        .order('created_at', { ascending: false }),
       supabase.auth.admin.listUsers(),
     ])
 
     if (caseEventsError) {
       throw new Error(caseEventsError.message)
+    }
+
+    if (caseWorkflowOverridesError) {
+      throw new Error(caseWorkflowOverridesError.message)
     }
 
     if (usersResponse.error) {
@@ -565,6 +587,14 @@ export default async function WorkroomPage() {
 
     eventsByCaseId = groupedEventsByCaseId
 
+    latestOverridesByCaseId = new Map<string, CaseWorkflowOverrideRow>()
+
+    for (const override of ((caseWorkflowOverrides as CaseWorkflowOverrideRow[] | null) ?? [])) {
+      if (!latestOverridesByCaseId.has(override.case_id)) {
+        latestOverridesByCaseId.set(override.case_id, override)
+      }
+    }
+
     userDisplayById = new Map(
       (usersResponse.data.users ?? []).map((user) => {
         const metadata = user.user_metadata ?? {}
@@ -582,6 +612,7 @@ export default async function WorkroomPage() {
   const workroomCases: WorkroomCase[] = await Promise.all(caseItems.map(async (caseItem) => {
     const caseEvents = eventsByCaseId.get(caseItem.id) ?? []
     const latestEvent = caseEvents[caseEvents.length - 1]
+    const latestOverride = latestOverridesByCaseId.get(caseItem.id) ?? null
     const cremationType = caseItem.cremation_type === 'general' ? 'general' : 'private'
     const workflow = await resolveWorkflow({
       caseId: caseItem.id,
@@ -591,13 +622,25 @@ export default async function WorkroomPage() {
         created_at: event.created_at,
       })),
     })
-    const completionEvent = workflow.isComplete
-      ? await findCompletionEvent({
-          caseId: caseItem.id,
-          cremationType,
-          caseEvents,
-        })
-      : null
+    const lastUpdatedSource =
+      latestOverride && getTimestampTime(latestOverride.created_at) >= getTimestampTime(latestEvent?.created_at ?? null)
+        ? 'override'
+        : 'event'
+    const lastUpdatedTime = lastUpdatedSource === 'override'
+      ? latestOverride?.created_at ?? latestEvent?.created_at ?? null
+      : latestEvent?.created_at ?? latestOverride?.created_at ?? null
+    const lastUpdatedUser = lastUpdatedSource === 'override'
+      ? latestOverride?.created_by
+        ? userDisplayById.get(latestOverride.created_by) ?? latestOverride.created_by
+        : null
+      : latestEvent?.created_by
+        ? userDisplayById.get(latestEvent.created_by) ?? latestEvent.created_by
+        : latestOverride?.created_by
+          ? userDisplayById.get(latestOverride.created_by) ?? latestOverride.created_by
+          : null
+    const completionSource = workflow.isComplete ? lastUpdatedSource : null
+    const terminalEventTime = workflow.isComplete ? lastUpdatedTime : null
+    const terminalEventUser = workflow.isComplete ? lastUpdatedUser : null
 
     return {
       id: caseItem.id,
@@ -605,10 +648,8 @@ export default async function WorkroomPage() {
       currentStep: workflow.currentStep,
       nextStep: workflow.nextStep,
       isComplete: workflow.isComplete,
-      lastEventTime: latestEvent?.created_at ?? null,
-      lastEventUser: latestEvent?.created_by
-        ? userDisplayById.get(latestEvent.created_by) ?? latestEvent.created_by
-        : null,
+      lastEventTime: lastUpdatedTime,
+      lastEventUser: lastUpdatedUser,
       location: latestEvent?.metadata?.location ?? null,
       weight:
         caseItem.pet_weight && caseItem.pet_weight_unit
@@ -620,11 +661,10 @@ export default async function WorkroomPage() {
       petName: caseItem.pet_name,
       cremationType: caseItem.cremation_type,
       memorialItems: caseItem.memorial_items ?? [],
-      terminalEventTime: completionEvent?.created_at ?? null,
-      terminalEventUser:
-        completionEvent?.created_by
-          ? userDisplayById.get(completionEvent.created_by) ?? completionEvent.created_by
-          : null,
+      terminalEventTime,
+      terminalEventUser,
+      lastUpdatedSource,
+      completionSource,
     }
   }))
 

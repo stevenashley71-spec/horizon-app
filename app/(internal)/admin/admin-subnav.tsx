@@ -13,6 +13,7 @@ const ADMIN_NAV_ITEMS: AdminNavItem[] = [
   { href: '/admin/clinics', label: 'Clinics' },
   { href: '/admin/clinic-products', label: 'Clinic Products' },
   { href: '/admin/staff', label: 'Staff' },
+  { href: '/admin/workflow', label: 'Workflow' },
 ]
 
 export function AdminSubnav() {
