@@ -254,14 +254,6 @@ export default async function CaseDetailPage({
           >
             Back to Cases
           </Link>
-          {isInternalUser ? (
-            <Link
-              href="/pickup"
-              className="rounded-lg bg-slate-900 px-4 py-2 font-medium text-white hover:bg-slate-800"
-            >
-              Print Pickup Sheets
-            </Link>
-          ) : null}
           {showPrintPickupSheetButton ? (
             <button
               id="print-single-pickup-sheet"
